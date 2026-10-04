@@ -18,6 +18,7 @@ from ..http import HttpClient, Session
 from ..scope import ScopeError, host_of, in_scope
 from .crawler import crawl
 from .dns_recon import dns_records
+from .port_scan import scan_ports
 from .js_extractor import extract_endpoints
 from .secret_scanner import scan_files
 from .sourcemap_detector import detect_sourcemaps
@@ -68,6 +69,8 @@ async def run_recon(
     session: Session | None = None,
     include_dns: bool = False,
     dns_resolver=None,
+    portscan: dict | None = None,
+    port_runner=None,
 ) -> dict:
     """Run the full recon chain and return the combined report dict."""
     bodies: dict[str, str] = {}  # url -> already-fetched HTML/JS, reused by the secret scan
@@ -111,6 +114,11 @@ async def run_recon(
     if include_dns and in_scope(seed_url):
         dns[host_of(seed_url)] = await dns_records(host_of(seed_url), dns_resolver)
 
+    ports = {}
+    if portscan is not None and in_scope(seed_url):  # opt-in: {"ports": spec|None, "timing": int}
+        h = host_of(seed_url)
+        ports[h] = await scan_ports(h, portscan.get("ports"), portscan.get("timing", 3), runner=port_runner)
+
     return {
         "seed": seed_url,
         "host": host_of(seed_url),
@@ -123,6 +131,7 @@ async def run_recon(
         "sourcemaps": sourcemaps,
         "secrets": secrets,
         "dns": dns,
+        "ports": ports,
         "summary": {
             "secrets": len(secrets),
             "pages": len(crawled["pages_crawled"]),
