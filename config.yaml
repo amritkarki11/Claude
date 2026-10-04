@@ -1,0 +1,35 @@
+# ============================================================
+#  Scope — ONLY these hosts may ever be touched. Hard allowlist.
+#  Every probe calls scope.check() first; out-of-scope = refuse.
+# ============================================================
+scope:
+  engagement: "Unicommerce staging VAPT (authorized)"
+  allowed_hosts:
+    - unistage.unicommerce.com
+    - keystgauth.unicommerce.com
+
+# ============================================================
+#  Model routing — each JOB runs on a TIER:
+#    local    = on your box (Ollama). Private. Free. The grunt worker.
+#    fast     = cloud, free tier (Groq). Breadth reasoning.
+#    frontier = cloud, PAID (Claude). Depth. Metered against the $100.
+# ============================================================
+models:
+  local:    "ollama/qwen3:4b"               # fits CPU / <8GB VRAM comfortably
+  fast:     "groq/llama-3.3-70b-versatile"  # verify current id on console.groq.com
+  frontier: "anthropic/claude-sonnet-5-5"   # set to a model id you have; the escalation brain
+  embed:    "ollama/nomic-embed-text"       # local embeddings for the knowledge base
+
+routing:
+  extraction:    local      # pull structured data out of responses
+  triage:        local      # "is this worth a closer look?"
+  redaction:     local      # sanitize before anything leaves the box
+  hypothesis:    fast       # "what could be wrong here?"  (free cloud)
+  exploit_chain: frontier   # the hard multi-step reasoning   (metered)
+  report:        fast       # write up verified findings
+
+privacy:
+  redact_before_cloud: true # strip PII/creds/tokens before fast/frontier calls
+
+budget:
+  frontier_usd_cap: 100     # self-tracked soft cap on the paid tier
