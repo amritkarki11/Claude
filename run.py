@@ -47,17 +47,36 @@ def parse_selection(answer: str, count: int) -> list[int] | None:
     return sorted(picked)
 
 
-def pick_subdomains(found: list[dict], include_all: bool = False, ask=input) -> list[str]:
+def format_source_statuses(statuses) -> str:
+    """One line per --domain run reporting what every OSINT source did.
+    Always printed — a source that failed is named, never swallowed into
+    a quiet zero."""
+    parts = [
+        f"{s.name}: {s.count} found" if s.ok else f"{s.name}: unavailable ({s.error})"
+        for s in statuses
+    ]
+    return "[subdomains] sources — " + ", ".join(parts)
+
+
+def pick_subdomains(found: list[dict], domain: str | None = None, include_all: bool = False, ask=input) -> list[str]:
     """Print discovered subdomains and return the hosts the user selects.
-    Nothing is selected unless the user says so (or include_all is set)."""
+    Nothing is selected unless the user says so (or include_all is set).
+
+    The apex domain itself is always offered as a candidate — even if every
+    OSINT source failed or returned nothing — so --domain never silently
+    falls back to leaving scope empty (or to config.yaml's allowlist)."""
     by_host = {r["subdomain"]: r for r in found if r.get("resolves")}
+    if domain:
+        apex = domain.lower().strip(".")
+        by_host.setdefault(apex, {"subdomain": apex, "resolves": True, "ips": []})
     hosts = sorted(by_host)
     if not hosts:
         print("[subdomains] no resolving subdomains discovered.")
         return []
-    print(f"[subdomains] {len(hosts)} resolving subdomain(s) discovered:")
+    print(f"[subdomains] {len(hosts)} candidate host(s):")
     for i, h in enumerate(hosts, 1):
-        print(f"  {i:3}. {h}  {', '.join(by_host[h]['ips'])}")
+        ips = ", ".join(by_host[h]["ips"]) or "(apex/unresolved)"
+        print(f"  {i:3}. {h}  {ips}")
     if include_all:
         return hosts
     while True:
@@ -84,8 +103,9 @@ def resolve_scope_mode(a, enumerate_fn=None, ask=input) -> None:
     elif a.domain:
         if enumerate_fn is None:
             from agent.recon.subdomains import enumerate_subdomains as enumerate_fn
-        found = asyncio.run(enumerate_fn(a.domain))
-        for h in pick_subdomains(found, include_all=a.include_subdomains, ask=ask):
+        found, statuses = asyncio.run(enumerate_fn(a.domain))
+        print(format_source_statuses(statuses))
+        for h in pick_subdomains(found, domain=a.domain, include_all=a.include_subdomains, ask=ask):
             add_to_scope(h)
 
 
