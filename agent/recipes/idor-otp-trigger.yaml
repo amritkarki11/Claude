@@ -1,0 +1,24 @@
+# IDOR on an OTP-triggering endpoint: requesting a one-time-passcode for an
+# object/account identifier you don't own, by varying only that identifier
+# while reusing your own authenticated session.
+id: idor-otp-trigger
+applies_to:
+  - api
+  - web
+tech_signals:
+  - rest-api
+  - session-cookie
+preconditions:
+  - two authenticated sessions are available at different privilege/account levels
+  - an endpoint exists that triggers an OTP/SMS/email code for a given object or account id
+detect:
+  - step: "Identify the OTP-trigger endpoint and the identifier parameter it takes (path or body)"
+  - step: "As session A, call the endpoint for an object/account id owned by session B"
+    method: POST
+  - step: "Record whether the call returns 200/success rather than 403/404"
+  - step: "Repeat with 2-3 different foreign ids to rule out a one-off race or cache hit"
+signal: "The endpoint returns success and (per out-of-band confirmation) actually delivers an OTP for an id the calling session does not own"
+verify: "Deterministic re-check: replay the exact same request with session A against a foreign id, capture the raw response twice, and confirm status + body both indicate the OTP was issued for that foreign id (not a cached/replayed success) before reporting"
+severity: high
+remediation: "Authorize the request against the OTP recipient's own identity (object-level authorization check) instead of trusting a client-supplied id; rate-limit and bind generated OTPs to the owning account/session server-side"
+source: "CWE-639 (Authorization Bypass Through User-Controlled Key)"
