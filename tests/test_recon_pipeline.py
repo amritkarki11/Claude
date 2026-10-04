@@ -60,3 +60,52 @@ async def test_recon_combined_report(tmp_path):
     assert path.name.startswith(f"recon_{HOST}_") and path.suffix == ".json"
     assert json.loads(path.read_text()) == report
     assert "2 pages" in format_summary(report, path)
+
+
+def test_extract_chunk_refs():
+    from agent.recon.pipeline import extract_chunk_refs
+
+    js = (
+        'const x=()=>import("./lazy-AbC123xy.js");'
+        'm.f||(m.f=["assets/a-Zx81kQ2p.js","assets/style-Qw3rTy.css"]);'
+        'load("assets/b-Pq9wEr71.js");import("https://evil.example/x.js");'
+    )
+    refs = extract_chunk_refs(js, f"{BASE}/assets/index-1.js")
+    assert f"{BASE}/assets/lazy-AbC123xy.js" in refs
+    assert f"{BASE}/assets/assets/a-Zx81kQ2p.js" in refs  # resolved against the JS file's base
+    assert f"{BASE}/assets/assets/b-Pq9wEr71.js" in refs
+    assert "https://evil.example/x.js" in refs  # pipeline drops cross-origin refs
+    assert not any(r.endswith(".css") for r in refs)
+
+
+async def test_recon_follows_chunks_deduped_scoped_and_capped(tmp_path):
+    fetched: list[str] = []
+    chunks = {
+        "/static/app.js": 'import("./c1.js");import("./c2.js");import("https://cdn.evil.example/x.js");',
+        "/static/c1.js": 'import("./c2.js");fetch("/api/chunked?q=1");//# sourceMappingURL=c1.js.map',
+        "/static/c2.js": f"var k='AKIAIOSFODNN7EXAMPLE';import('./app.js');",
+    }
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.url.host == HOST
+        fetched.append(req.url.path)
+        if req.url.path == "/":
+            return httpx.Response(200, text='<script src="/static/app.js"></script>', headers={"content-type": "text/html"})
+        if req.url.path in chunks:
+            return httpx.Response(200, text=chunks[req.url.path], headers={"content-type": "text/javascript"})
+        if req.url.path == "/static/c1.js.map":
+            return httpx.Response(200, text=SMAP)
+        return httpx.Response(404)
+
+    async with HttpClient(transport=httpx.MockTransport(handler), log_path=tmp_path / "l.jsonl") as c:
+        report = await run_recon(c, BASE + "/")
+    assert report["js_urls"] == [f"{BASE}/static/{n}.js" for n in ("app", "c1", "c2")]
+    assert len(report["js_urls"]) == len(set(report["js_urls"]))  # each chunk processed once
+    assert "https://cdn.evil.example/x.js" in report["skipped_js"]
+    assert any(e["path"] == "/api/chunked" for e in report["endpoints"])
+    assert [m["map_url"] for m in report["sourcemaps"]] == [f"{BASE}/static/c1.js.map"]
+    assert any(s["type"] == "aws_access_key" and s["source"].endswith("c2.js") for s in report["secrets"])
+
+    async with HttpClient(transport=httpx.MockTransport(handler), log_path=tmp_path / "l2.jsonl") as c:
+        capped = await run_recon(c, BASE + "/", max_js_files=2)
+    assert len(capped["js_urls"]) == 2

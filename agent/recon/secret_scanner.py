@@ -69,6 +69,19 @@ _PLACEHOLDER = re.compile(
 _ENTROPY_TOKEN = re.compile(r"[A-Za-z0-9+/=_\-]{16,}")
 
 
+_ASSET_EXT = re.compile(r"\.(?:js|mjs|css|map|woff2?|ttf|eot|png|jpe?g|gif|svg|webp|ico)$", re.I)
+_ASSET_EXT_PREFIX = re.compile(r"\.(?:m?js|css|map|woff2?|ttf|eot|png|jpe?g|gif|svg|webp|ico)\b", re.I)
+_HASHED_BUNDLE = re.compile(r"^[\w.]+-[A-Za-z0-9_-]{6,}\.(?:m?js|css)$")
+
+
+def _looks_like_asset(tok: str, content: str, start: int, end: int) -> bool:
+    """Static asset reference (path, extension, hashed bundle name) rather than a secret."""
+    if _ASSET_EXT.search(tok) or _HASHED_BUNDLE.match(tok) or "assets/" in tok:
+        return True
+    # The token regex stops at '.', so a name like "index-Ab3dEf9x.js" is cut before ".js".
+    return bool(_ASSET_EXT_PREFIX.match(content, end))
+
+
 def shannon_entropy(s: str) -> float:
     """Bits of entropy per character."""
     if not s:
@@ -147,6 +160,8 @@ def scan_text(
         for m in _ENTROPY_TOKEN.finditer(content):
             tok = m.group(0)
             if len(tok) < entropy_min_length or _overlaps(m.span(), taken):
+                continue
+            if _looks_like_asset(tok, content, m.start(), m.end()):
                 continue
             if _looks_random(tok) and shannon_entropy(tok) >= entropy_threshold:
                 add("high_entropy_string", tok, m.start(), m.end(), "low")

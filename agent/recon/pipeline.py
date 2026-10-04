@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 from datetime import datetime, timezone
 
 import httpx
+from urllib.parse import urldefrag, urljoin, urlsplit
 
 from ..http import HttpClient, Session
 from ..scope import ScopeError, host_of, in_scope
@@ -20,6 +22,39 @@ from .secret_scanner import scan_files
 from .sourcemap_detector import detect_sourcemaps
 
 DEFAULT_OUT_DIR = pathlib.Path("outputs")
+DEFAULT_MAX_JS_FILES = 50
+
+# Quoted JS path strings: dynamic import("./x.js"), Vite __vite__mapDeps entries, "assets/x-HASH.js".
+_CHUNK_REF = re.compile(
+    r"""["'`]((?:\./|\.\./|/)?(?:[\w.\-]+/)*[\w.\-]+\.m?js)(?:\?[^"'`\s]*)?["'`]"""
+)
+
+
+def extract_chunk_refs(js_text: str, js_url: str) -> list[str]:
+    """Absolute URLs of JS chunks referenced from `js_text`, resolved against `js_url`.
+
+    Only strings that look like chunk references are taken: `assets/...js`, relative
+    `./x.js` / `../x.js`, or bare names inside `import(...)` / `__vite__mapDeps`.
+    """
+    cands: list[str] = []
+    for m in re.finditer(r"""\bimport\(\s*["'`]([^"'`]+?\.m?js)["'`]\s*\)""", js_text):
+        cands.append(m.group(1))
+    for m in re.finditer(r"__vite__mapDeps|\bm\.f=", js_text):
+        # mapDeps array literal: [...] of quoted paths near the marker
+        seg = js_text[m.start(): m.start() + 20000]
+        arr = re.search(r"\[((?:\s*[\"'][^\"']+[\"']\s*,?)+)\]", seg)
+        if arr:
+            cands += re.findall(r"""["']([^"']+?\.m?js)["']""", arr.group(1))
+    for m in _CHUNK_REF.finditer(js_text):
+        ref = m.group(1)
+        if ref.startswith((".", "/")) or "assets/" in ref:
+            cands.append(ref)
+    out: list[str] = []
+    for c in cands:
+        url = urldefrag(urljoin(js_url, c))[0]
+        if url not in out:
+            out.append(url)
+    return out
 
 
 async def run_recon(
@@ -28,6 +63,7 @@ async def run_recon(
     *,
     max_depth: int = 2,
     max_pages: int = 100,
+    max_js_files: int = DEFAULT_MAX_JS_FILES,
     session: Session | None = None,
 ) -> dict:
     """Run the full recon chain and return the combined report dict."""
@@ -40,15 +76,29 @@ async def run_recon(
     skipped_js = [u for u in crawled["script_urls"] if not in_scope(u)]
 
     endpoints: list[dict] = []
-    for js in js_urls:
+    queue = list(js_urls)
+    seen = set(queue)  # every JS URL ever queued -> each chunk is fetched once
+    js_urls = []       # JS files actually fetched, in scope
+    while queue and len(js_urls) < max_js_files:
+        js = queue.pop(0)
         try:
             resp = await client.get(js, session=session)
             resp.raise_for_status()
         except (ScopeError, httpx.HTTPError):
             skipped_js.append(js)
             continue
+        js_urls.append(js)
         bodies[js] = resp.text
         endpoints.extend({**e, "source": js} for e in extract_endpoints(resp.text))
+        for ref in extract_chunk_refs(resp.text, js):
+            if ref in seen:
+                continue
+            seen.add(ref)
+            if urlsplit(ref).netloc == urlsplit(js).netloc and in_scope(ref):  # same-origin + scope
+                queue.append(ref)
+            else:
+                skipped_js.append(ref)
+    skipped_js.extend(u for u in queue if u not in skipped_js)  # left over once the cap was hit
 
     sourcemaps = await detect_sourcemaps(client, seed_url, js_urls, session=session)
 

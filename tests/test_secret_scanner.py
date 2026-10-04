@@ -71,3 +71,16 @@ def test_scan_files_and_short_preview():
     hits = scan_files({"a.js": f"k='{AWS}'", "b.html": "nothing here"})
     assert [h["source"] for h in hits] == ["a.js"]
     assert redact_preview("short") == "*****"
+
+
+def test_asset_references_not_flagged_as_entropy():
+    for ref in (
+        "assets/q8Zr3KfP0xLm9TvB2nWc7YdH5sJe1GaU4oRi6XbN",
+        "q8Zr3KfP0xLm9TvB2nWc7YdH5sJe1GaU4oRi6XbN.js",
+        "q8Zr3KfP0xLm9TvB2nWc7YdH5sJe1GaU4oRi6XbN.woff2",
+        "index-q8Zr3KfP0xLm9TvB2nWc7YdH5sJe.js",
+    ):
+        assert not scan_text(f"load('{ref}')"), ref
+    # same token without asset shape is still flagged; pattern secrets unaffected
+    assert _only(scan_text(f"x = '{BLOB}'"), "high_entropy_string")
+    assert _only(scan_text(f"a='assets/app.js'; k='{AWS}'"), "aws_access_key")
