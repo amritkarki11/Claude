@@ -59,24 +59,31 @@ def format_source_statuses(statuses) -> str:
 
 
 def pick_subdomains(found: list[dict], domain: str | None = None, include_all: bool = False, ask=input) -> list[str]:
-    """Print discovered subdomains and return the hosts the user selects.
+    """Print every discovered subdomain and return the hosts the user selects.
     Nothing is selected unless the user says so (or include_all is set).
 
-    The apex domain itself is always offered as a candidate — even if every
-    OSINT source failed or returned nothing — so --domain never silently
-    falls back to leaving scope empty (or to config.yaml's allowlist)."""
-    by_host = {r["subdomain"]: r for r in found if r.get("resolves")}
+    A subdomain that fails DNS resolution is NEVER dropped from this list —
+    only its `resolves` status changes. It's shown as unresolved and stays
+    selectable; whether to include it is the user's call, not this
+    function's. The apex domain itself is always offered as a candidate too
+    — even if every OSINT source failed or returned nothing — so --domain
+    never silently falls back to leaving scope empty (or to config.yaml's
+    allowlist)."""
+    by_host = {r["subdomain"]: r for r in found}
     if domain:
         apex = domain.lower().strip(".")
-        by_host.setdefault(apex, {"subdomain": apex, "resolves": True, "ips": []})
+        by_host.setdefault(apex, {"subdomain": apex, "resolves": True, "ips": [], "errors": []})
     hosts = sorted(by_host)
     if not hosts:
-        print("[subdomains] no resolving subdomains discovered.")
+        print("[subdomains] no subdomains discovered.")
         return []
-    print(f"[subdomains] {len(hosts)} candidate host(s):")
+    resolving = sum(1 for h in hosts if by_host[h].get("resolves"))
+    unresolved = len(hosts) - resolving
+    print(f"[subdomains] {len(hosts)} discovered ({resolving} resolving, {unresolved} unresolved):")
     for i, h in enumerate(hosts, 1):
-        ips = ", ".join(by_host[h]["ips"]) or "(apex/unresolved)"
-        print(f"  {i:3}. {h}  {ips}")
+        r = by_host[h]
+        detail = ", ".join(r["ips"]) if r.get("resolves") else "unresolved"
+        print(f"  {i:3}. {h}  {detail}")
     if include_all:
         return hosts
     while True:

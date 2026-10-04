@@ -146,18 +146,62 @@ async def gather_candidates(client: HttpClient, domain: str) -> tuple[set[str], 
     return merged, statuses
 
 
-async def resolve_host(host: str, resolver=None) -> list[str]:
-    """Return sorted A/AAAA addresses for host; [] if it doesn't resolve."""
-    resolver = resolver or dns.asyncresolver.Resolver()
-    resolver.lifetime = 5.0
+# Used only when the configured/system resolver itself appears broken
+# (NoNameservers, timeout, OS-level failure) — never for a plain NXDOMAIN,
+# which is a legitimate "no such name" answer, not a failure.
+FALLBACK_NAMESERVERS = ["8.8.8.8", "1.1.1.1"]
+_NO_RECORD = (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer)
+_RESOLVER_FAILURE = (dns.resolver.NoNameservers, dns.exception.Timeout, OSError)
+
+
+def _make_fallback_resolver():
+    r = dns.asyncresolver.Resolver(configure=False)
+    r.nameservers = list(FALLBACK_NAMESERVERS)
+    r.lifetime = 5.0
+    return r
+
+
+async def resolve_host(host: str, resolver=None, fallback_resolver=None) -> tuple[list[str], list[str]]:
+    """Return (sorted A/AAAA addresses, [error strings]) for host.
+
+    A plain "no such record" (NXDOMAIN/NoAnswer) from the primary resolver
+    is final for that record type — no fallback needed, and no error logged.
+    Anything that looks like the resolver itself failing (NoNameservers,
+    timeout, OS error) is retried once against public nameservers
+    (8.8.8.8, 1.1.1.1) before giving up on that record type. Every failure
+    actually seen is recorded in the returned error list; resolution
+    failing never removes the host from the caller's results, only flips
+    `resolves` to False."""
+    primary = resolver or dns.asyncresolver.Resolver()
+    if not getattr(primary, "lifetime", None):
+        primary.lifetime = 5.0
+    fallback = fallback_resolver
     ips: set[str] = set()
+    errors: list[str] = []
+
     for rtype in ("A", "AAAA"):
         try:
-            answer = await resolver.resolve(host, rtype)
+            answer = await primary.resolve(host, rtype)
             ips.update(r.to_text() for r in answer)
-        except (dns.exception.DNSException, OSError):
             continue
-    return sorted(ips)
+        except _NO_RECORD:
+            continue
+        except (dns.exception.DNSException, OSError) as e:
+            errors.append(f"{rtype}: {type(e).__name__}: {e}")
+            if not isinstance(e, _RESOLVER_FAILURE):
+                continue  # a definitive DNS error, not an infra failure — no point retrying
+
+        if fallback is None:
+            fallback = _make_fallback_resolver()
+        try:
+            answer = await fallback.resolve(host, rtype)
+            ips.update(r.to_text() for r in answer)
+        except _NO_RECORD:
+            pass
+        except (dns.exception.DNSException, OSError) as e2:
+            errors.append(f"{rtype} via fallback {FALLBACK_NAMESERVERS}: {type(e2).__name__}: {e2}")
+
+    return sorted(ips), errors
 
 
 async def enumerate_subdomains(
@@ -165,13 +209,16 @@ async def enumerate_subdomains(
     client: HttpClient | None = None,
     *,
     resolver=None,
+    fallback_resolver=None,
     concurrency: int = 20,
 ) -> tuple[list[dict], list[SourceStatus]]:
-    """Return (sorted [{subdomain, resolves, ips}], [SourceStatus, ...]).
+    """Return (sorted [{subdomain, resolves, ips, errors}], [SourceStatus, ...]).
 
-    The status list always has one entry per source in SOURCES, win or
-    lose, so a caller can report exactly what happened — never a silent
-    zero."""
+    Every candidate from every source is kept, whether or not it resolves —
+    resolution failure only flips `resolves` to False and records why in
+    `errors`; it never drops the host from the list. The status list always
+    has one entry per source in SOURCES, win or lose, so a caller can report
+    exactly what happened — never a silent zero."""
     domain = domain.lower().strip().strip(".")
     own = client is None
     client = client or HttpClient()
@@ -185,8 +232,8 @@ async def enumerate_subdomains(
 
     async def one(host: str) -> dict:
         async with sem:
-            ips = await resolve_host(host, resolver)
-        return {"subdomain": host, "resolves": bool(ips), "ips": ips}
+            ips, errors = await resolve_host(host, resolver, fallback_resolver)
+        return {"subdomain": host, "resolves": bool(ips), "ips": ips, "errors": errors}
 
     results = await asyncio.gather(*(one(h) for h in sorted(candidates)))
     return sorted(results, key=lambda r: r["subdomain"]), statuses

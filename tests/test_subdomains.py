@@ -111,9 +111,108 @@ async def test_enumerate_resolves_and_restores_scope(tmp_path):
     assert names == sorted(names)
     assert {"a.example.com", "www.example.com", "c.example.com", "d.example.com"} <= set(names)
     by_name = {r["subdomain"]: r for r in out}
-    assert by_name["a.example.com"] == {"subdomain": "a.example.com", "resolves": True, "ips": ["1.2.3.4"]}
+    assert by_name["a.example.com"] == {
+        "subdomain": "a.example.com", "resolves": True, "ips": ["1.2.3.4"], "errors": []}
+    # b.example.com fails resolution but must still be present in the output,
+    # just marked unresolved — never dropped for failing to resolve.
     assert by_name["b.example.com"]["resolves"] is False
+    assert by_name["b.example.com"]["ips"] == []
     assert len(statuses) == 3 and all(s.ok for s in statuses)
+
+
+class _FailsThenFallbackSucceeds:
+    """Primary resolver looks broken (NoNameservers on every query); the
+    fallback (public nameserver) resolver actually answers for A and has
+    nothing for AAAA."""
+    lifetime = 5.0
+
+    async def resolve(self, host, rtype):
+        raise dns.resolver.NoNameservers()
+
+
+class _FallbackResolver:
+    async def resolve(self, host, rtype):
+        if rtype == "A":
+            return [SimpleNamespace(to_text=lambda: "9.9.9.9")]
+        raise dns.resolver.NoAnswer()
+
+
+async def test_resolve_host_falls_back_to_public_nameservers_on_resolver_failure():
+    ips, errors = await sd.resolve_host(
+        "flaky.example.com", resolver=_FailsThenFallbackSucceeds(), fallback_resolver=_FallbackResolver()
+    )
+    assert ips == ["9.9.9.9"]
+    assert any("NoNameservers" in e for e in errors)  # the primary failure is still recorded
+
+
+class _AlwaysFailsEvenWithFallback:
+    lifetime = 5.0
+
+    async def resolve(self, host, rtype):
+        raise dns.exception.Timeout()
+
+
+async def test_resolve_host_stays_unresolved_when_fallback_also_fails():
+    ips, errors = await sd.resolve_host(
+        "dead.example.com", resolver=_AlwaysFailsEvenWithFallback(), fallback_resolver=_AlwaysFailsEvenWithFallback()
+    )
+    assert ips == []
+    assert any("Timeout" in e for e in errors)
+    assert any("fallback" in e for e in errors)
+
+
+async def test_resolve_host_nxdomain_is_not_treated_as_resolver_failure():
+    """A plain NXDOMAIN (no such name) must never trigger a fallback query —
+    it's a definitive answer, not an infra failure."""
+    calls = []
+
+    class Fallback:
+        async def resolve(self, host, rtype):
+            calls.append(rtype)
+            raise AssertionError("fallback should never be queried for a plain NXDOMAIN")
+
+    # b.example.com is wired in FakeResolver to raise NXDOMAIN for every query
+    ips, errors = await sd.resolve_host("b.example.com", resolver=FakeResolver(), fallback_resolver=Fallback())
+    assert ips == [] and errors == [] and calls == []
+
+
+async def test_unresolved_subdomain_is_never_dropped_from_enumeration(tmp_path):
+    def handler(req):
+        if req.url.host == "crt.sh":
+            return httpx.Response(200, text=json.dumps([{"name_value": "dead.example.com"}]))
+        return httpx.Response(200, text="[]")
+
+    async with HttpClient(transport=httpx.MockTransport(handler), log_path=tmp_path / "l.jsonl") as c:
+        out, _ = await sd.enumerate_subdomains(
+            "example.com", c,
+            resolver=_AlwaysFailsEvenWithFallback(), fallback_resolver=_AlwaysFailsEvenWithFallback(),
+        )
+    assert [r["subdomain"] for r in out] == ["dead.example.com"]
+    assert out[0]["resolves"] is False
+    assert out[0]["errors"]  # the real resolution errors are preserved, not swallowed
+
+
+def test_picker_shows_and_allows_selecting_unresolved_hosts():
+    found = [
+        {"subdomain": "ok.example.com", "resolves": True, "ips": ["1.1.1.1"], "errors": []},
+        {"subdomain": "dead.example.com", "resolves": False, "ips": [], "errors": ["A: Timeout"]},
+    ]
+    # both appear, in the "N discovered (R resolving, U unresolved)" form
+    picked = []
+
+    def capture_print(msg, _orig=print):
+        picked.append(msg)
+
+    import builtins
+    orig_print = builtins.print
+    builtins.print = capture_print
+    try:
+        result = run.pick_subdomains(found, ask=lambda _: "1,2")
+    finally:
+        builtins.print = orig_print
+    assert any("2 discovered (1 resolving, 1 unresolved)" in m for m in picked)
+    # the unresolved host is still selectable, not filtered out of the list
+    assert result == ["dead.example.com", "ok.example.com"]
 
 
 def test_picker_only_chosen_hosts_enter_scope():
