@@ -13,6 +13,82 @@ from agent.router import ask
 from agent.scope import ALLOWED, add_to_scope, host_of, set_scope
 
 
+def read_scope_file(path: str) -> list[str]:
+    """Approved hosts, one per line. Blank lines and #comments are skipped;
+    URLs are reduced to their host."""
+    hosts = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if line and (h := host_of(line)):
+                hosts.append(h)
+    return hosts
+
+
+def parse_selection(answer: str, count: int) -> list[int] | None:
+    """Parse 'all', or numbers/ranges like '1,3,5-7' (1-based) into 0-based
+    indexes. Returns None on invalid input."""
+    answer = answer.strip().lower()
+    if answer == "all":
+        return list(range(count))
+    picked: set[int] = set()
+    try:
+        for part in answer.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            lo, _, hi = part.partition("-")
+            lo_i, hi_i = int(lo), int(hi or lo)
+            if lo_i < 1 or hi_i > count or lo_i > hi_i:
+                return None
+            picked.update(range(lo_i - 1, hi_i))
+    except ValueError:
+        return None
+    return sorted(picked)
+
+
+def pick_subdomains(found: list[dict], include_all: bool = False, ask=input) -> list[str]:
+    """Print discovered subdomains and return the hosts the user selects.
+    Nothing is selected unless the user says so (or include_all is set)."""
+    by_host = {r["subdomain"]: r for r in found if r.get("resolves")}
+    hosts = sorted(by_host)
+    if not hosts:
+        print("[subdomains] no resolving subdomains discovered.")
+        return []
+    print(f"[subdomains] {len(hosts)} resolving subdomain(s) discovered:")
+    for i, h in enumerate(hosts, 1):
+        print(f"  {i:3}. {h}  {', '.join(by_host[h]['ips'])}")
+    if include_all:
+        return hosts
+    while True:
+        answer = ask("Select hosts to include (e.g. 1,3,5-7), 'all', or blank for none: ")
+        if not answer.strip():
+            return []
+        idx = parse_selection(answer, len(hosts))
+        if idx is not None:
+            return [hosts[i] for i in idx]
+        print("[subdomains] invalid selection, try again.")
+
+
+def resolve_scope_mode(a, enumerate_fn=None, ask=input) -> None:
+    """Apply --target/--domain/--scope-list to the run allowlist."""
+    if a.target:
+        host = host_of(a.target)
+        if not host:
+            print(f"[scope] could not parse a host from target {a.target!r}")
+            sys.exit(1)
+        add_to_scope(host)
+    elif a.scope_list:
+        for h in read_scope_file(a.scope_list):
+            add_to_scope(h)
+    elif a.domain:
+        if enumerate_fn is None:
+            from agent.recon.subdomains import enumerate_subdomains as enumerate_fn
+        found = asyncio.run(enumerate_fn(a.domain))
+        for h in pick_subdomains(found, include_all=a.include_subdomains, ask=ask):
+            add_to_scope(h)
+
+
 def check():
     print(f"[scope] allowlist: {sorted(ALLOWED)}")
     for job, label in [("triage", "LOCAL  (ollama)"),
@@ -58,20 +134,28 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="verify model providers")
     ap.add_argument("--scope", help="comma-separated allowed hosts for this run, e.g. host1,host2")
-    ap.add_argument("--target", help="target URL; its host is auto-added to scope")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--target", help="single target URL; its host is added to scope")
+    mode.add_argument("--domain", help="enumerate subdomains of DOMAIN, then choose which to scope")
+    mode.add_argument("--scope-list", help="file of approved hosts, one per line")
+    ap.add_argument("--include-subdomains", action="store_true",
+                    help="with --domain: include all discovered subdomains without prompting")
     ap.add_argument("--recon", metavar="SEED_URL", help="crawl + JS endpoints + source maps; seed host is auto-added to scope")
     a = ap.parse_args()
 
     if a.scope:
         set_scope(h.strip() for h in a.scope.split(",") if h.strip())
 
-    target = a.target or a.recon
-    if target:
-        target_host = host_of(target)
-        if not target_host:
-            print(f"[scope] could not parse a host from target {target!r}")
+    if a.include_subdomains and not a.domain:
+        ap.error("--include-subdomains requires --domain")
+
+    resolve_scope_mode(a)
+    if a.recon:
+        seed_host = host_of(a.recon)
+        if not seed_host:
+            print(f"[scope] could not parse a host from {a.recon!r}")
             sys.exit(1)
-        add_to_scope(target_host)
+        add_to_scope(seed_host)
 
     if a.check:
         check()
