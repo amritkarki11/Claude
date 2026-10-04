@@ -65,8 +65,11 @@ async def crawl(
     max_depth: int = 2,
     max_pages: int = 100,
     session: Session | None = None,
+    bodies: dict[str, str] | None = None,
 ) -> dict:
     """Crawl same-origin pages from `seed`.
+
+    If `bodies` is given, each crawled page's HTML is stored in it by URL.
 
     Returns {pages_crawled, forms, script_urls, discovered_urls}.
     discovered_urls = every same-origin, in-scope URL seen (crawled or not).
@@ -106,6 +109,8 @@ async def crawl(
             continue
 
         pages.append(url)
+        if bodies is not None:
+            bodies[url] = resp.text
         links, page_forms, page_scripts = _parse(url, resp.text)
         forms.extend(page_forms)
         for s in page_scripts:

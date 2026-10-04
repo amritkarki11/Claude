@@ -15,7 +15,8 @@ import httpx
 from ..http import HttpClient, Session
 from ..scope import ScopeError, host_of, in_scope
 from .crawler import crawl
-from .js_extractor import extract_from_url
+from .js_extractor import extract_endpoints
+from .secret_scanner import scan_files
 from .sourcemap_detector import detect_sourcemaps
 
 DEFAULT_OUT_DIR = pathlib.Path("outputs")
@@ -30,7 +31,10 @@ async def run_recon(
     session: Session | None = None,
 ) -> dict:
     """Run the full recon chain and return the combined report dict."""
-    crawled = await crawl(client, seed_url, max_depth=max_depth, max_pages=max_pages, session=session)
+    bodies: dict[str, str] = {}  # url -> already-fetched HTML/JS, reused by the secret scan
+    crawled = await crawl(
+        client, seed_url, max_depth=max_depth, max_pages=max_pages, session=session, bodies=bodies
+    )
 
     js_urls = [u for u in crawled["script_urls"] if in_scope(u)]
     skipped_js = [u for u in crawled["script_urls"] if not in_scope(u)]
@@ -38,13 +42,17 @@ async def run_recon(
     endpoints: list[dict] = []
     for js in js_urls:
         try:
-            found = await extract_from_url(client, js, session=session)
+            resp = await client.get(js, session=session)
+            resp.raise_for_status()
         except (ScopeError, httpx.HTTPError):
             skipped_js.append(js)
             continue
-        endpoints.extend({**e, "source": js} for e in found)
+        bodies[js] = resp.text
+        endpoints.extend({**e, "source": js} for e in extract_endpoints(resp.text))
 
     sourcemaps = await detect_sourcemaps(client, seed_url, js_urls, session=session)
+
+    secrets = scan_files(bodies)  # final step: offline scan of every fetched body
 
     return {
         "seed": seed_url,
@@ -56,7 +64,9 @@ async def run_recon(
         "skipped_js": skipped_js,
         "endpoints": endpoints,
         "sourcemaps": sourcemaps,
+        "secrets": secrets,
         "summary": {
+            "secrets": len(secrets),
             "pages": len(crawled["pages_crawled"]),
             "forms": len(crawled["forms"]),
             "js_files": len(js_urls),
@@ -83,6 +93,7 @@ def format_summary(report: dict, path: pathlib.Path) -> str:
     return (
         f"[recon] {report['host']}: {s['pages']} pages, {s['forms']} forms, "
         f"{s['js_files']} JS files, {s['endpoints']} endpoints ({s['params']} params), "
-        f"{s['sourcemaps']} exposed source maps ({s['sources_exposed']} sources)\n"
+        f"{s['sourcemaps']} exposed source maps ({s['sources_exposed']} sources), "
+        f"{s['secrets']} potential secrets\n"
         f"[recon] report: {path}"
     )
