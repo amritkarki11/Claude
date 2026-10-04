@@ -106,7 +106,7 @@ async def recon(seed_url: str) -> None:
     from agent.recon.pipeline import format_summary, run_recon, write_report
 
     async with HttpClient() as client:
-        report = await run_recon(client, seed_url)
+        report = await run_recon(client, seed_url, include_dns=True)
     print(format_summary(report, write_report(report)))
 
 

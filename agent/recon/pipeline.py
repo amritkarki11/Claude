@@ -17,6 +17,7 @@ from urllib.parse import urldefrag, urljoin, urlsplit
 from ..http import HttpClient, Session
 from ..scope import ScopeError, host_of, in_scope
 from .crawler import crawl
+from .dns_recon import dns_records
 from .js_extractor import extract_endpoints
 from .secret_scanner import scan_files
 from .sourcemap_detector import detect_sourcemaps
@@ -65,6 +66,8 @@ async def run_recon(
     max_pages: int = 100,
     max_js_files: int = DEFAULT_MAX_JS_FILES,
     session: Session | None = None,
+    include_dns: bool = False,
+    dns_resolver=None,
 ) -> dict:
     """Run the full recon chain and return the combined report dict."""
     bodies: dict[str, str] = {}  # url -> already-fetched HTML/JS, reused by the secret scan
@@ -104,6 +107,10 @@ async def run_recon(
 
     secrets = scan_files(bodies)  # final step: offline scan of every fetched body
 
+    dns = {}
+    if include_dns and in_scope(seed_url):
+        dns[host_of(seed_url)] = await dns_records(host_of(seed_url), dns_resolver)
+
     return {
         "seed": seed_url,
         "host": host_of(seed_url),
@@ -115,6 +122,7 @@ async def run_recon(
         "endpoints": endpoints,
         "sourcemaps": sourcemaps,
         "secrets": secrets,
+        "dns": dns,
         "summary": {
             "secrets": len(secrets),
             "pages": len(crawled["pages_crawled"]),
