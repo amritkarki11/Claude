@@ -22,6 +22,7 @@ from .port_scan import scan_ports
 from .js_extractor import extract_endpoints
 from .secret_scanner import scan_files
 from .sourcemap_detector import detect_sourcemaps
+from .wayback import run_archive_recon
 
 DEFAULT_OUT_DIR = pathlib.Path("outputs")
 DEFAULT_MAX_JS_FILES = 50
@@ -71,6 +72,7 @@ async def run_recon(
     dns_resolver=None,
     portscan: dict | None = None,
     port_runner=None,
+    include_archive: bool = False,
 ) -> dict:
     """Run the full recon chain and return the combined report dict."""
     bodies: dict[str, str] = {}  # url -> already-fetched HTML/JS, reused by the secret scan
@@ -80,6 +82,25 @@ async def run_recon(
 
     js_urls = [u for u in crawled["script_urls"] if in_scope(u)]
     skipped_js = [u for u in crawled["script_urls"] if not in_scope(u)]
+
+    # Archive/OSINT recon (opt-in): wayback.py handles its own scope exception
+    # for the archive hosts themselves. Any in-scope JS it turns up that the
+    # crawl didn't already see is folded into the same queue below, so it
+    # gets the identical extraction / source-map / secret treatment as
+    # crawled JS. Out-of-scope archive hits are recorded in skipped_js too.
+    archive: dict[str, dict] = {}
+    archive_new_js = 0
+    if include_archive and in_scope(seed_url):
+        h = host_of(seed_url)
+        arc = await run_archive_recon(client, h, session=session)
+        archive[h] = arc.to_dict()
+        for u in arc.js_urls:
+            if in_scope(u):
+                if u not in js_urls:
+                    js_urls.append(u)
+                    archive_new_js += 1
+            elif u not in skipped_js:
+                skipped_js.append(u)
 
     endpoints: list[dict] = []
     queue = list(js_urls)
@@ -132,6 +153,7 @@ async def run_recon(
         "secrets": secrets,
         "dns": dns,
         "ports": ports,
+        "archive": archive,
         "summary": {
             "secrets": len(secrets),
             "pages": len(crawled["pages_crawled"]),
@@ -141,6 +163,11 @@ async def run_recon(
             "params": sum(len(e["params"]) for e in endpoints),
             "sourcemaps": len(sourcemaps),
             "sources_exposed": sum(m["source_count"] for m in sourcemaps),
+            "archive_urls": sum(
+                v["summary"]["js_urls"] + v["summary"]["endpoints"] + v["summary"]["other"]
+                for v in archive.values()
+            ),
+            "archive_new_js": archive_new_js,
         },
     }
 
@@ -157,10 +184,12 @@ def write_report(report: dict, out_dir: pathlib.Path | str = DEFAULT_OUT_DIR) ->
 
 def format_summary(report: dict, path: pathlib.Path) -> str:
     s = report["summary"]
-    return (
+    line = (
         f"[recon] {report['host']}: {s['pages']} pages, {s['forms']} forms, "
         f"{s['js_files']} JS files, {s['endpoints']} endpoints ({s['params']} params), "
         f"{s['sourcemaps']} exposed source maps ({s['sources_exposed']} sources), "
-        f"{s['secrets']} potential secrets\n"
-        f"[recon] report: {path}"
+        f"{s['secrets']} potential secrets"
     )
+    if report.get("archive"):
+        line += f", archive: {s['archive_urls']} urls, {s['archive_new_js']} new JS"
+    return f"{line}\n[recon] report: {path}"

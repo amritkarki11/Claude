@@ -109,3 +109,59 @@ async def test_recon_follows_chunks_deduped_scoped_and_capped(tmp_path):
     async with HttpClient(transport=httpx.MockTransport(handler), log_path=tmp_path / "l2.jsonl") as c:
         capped = await run_recon(c, BASE + "/", max_js_files=2)
     assert len(capped["js_urls"]) == 2
+
+
+async def test_recon_folds_in_archive_section_and_new_js(tmp_path):
+    """include_archive=True: wayback/urlscan hits land under report["archive"],
+    and any NEW in-scope JS they surface gets fetched + extracted + source-mapped
+    + secret-scanned exactly like crawled JS -- deduped against what the crawl
+    already found."""
+    CDX_ROWS = [["original"], [f"{BASE}/static/app.js"], [f"{BASE}/static/old.js"]]
+    URLSCAN_RESULTS = {"results": [{"page": {"url": f"{BASE}/api/legacy?id=1"}}]}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.host == "web.archive.org":
+            return httpx.Response(200, json=CDX_ROWS)
+        if req.url.host == "urlscan.io":
+            return httpx.Response(200, json=URLSCAN_RESULTS)
+        assert req.url.host == HOST
+        html = {"headers": {"content-type": "text/html"}}
+        routes = {
+            "/": httpx.Response(200, text=HTML, **html),
+            "/about": httpx.Response(200, text="<html>about</html>", **html),
+            "/static/app.js": httpx.Response(200, text=JS, headers={"content-type": "text/javascript"}),
+            "/static/app.js.map": httpx.Response(200, text=SMAP),
+            "/static/old.js": httpx.Response(
+                200,
+                text="fetch('/api/archived?x=1'); var k='AKIAIOSFODNN7EXAMPLE';",
+                headers={"content-type": "text/javascript"},
+            ),
+        }
+        return routes.get(req.url.path, httpx.Response(404))
+
+    async with HttpClient(transport=httpx.MockTransport(handler), log_path=tmp_path / "l.jsonl") as c:
+        report = await run_recon(c, BASE + "/", include_archive=True)
+
+    assert HOST in report["archive"]
+    arc = report["archive"][HOST]
+    assert arc["sources"]["wayback"] == "wayback: 2 urls"
+    assert arc["sources"]["urlscan"] == "urlscan: 1 urls"
+    assert arc["errors"] == []
+
+    # app.js was already found by the crawl -> not double-counted as "new"
+    # old.js is new archive-only JS -> fed into the same extraction pipeline
+    assert f"{BASE}/static/old.js" in report["js_urls"]
+    assert report["summary"]["archive_new_js"] == 1
+    assert report["summary"]["archive_urls"] == 3  # app.js + old.js + /api/legacy
+
+    assert any(e["path"] == "/api/archived" for e in report["endpoints"])
+    assert any(s["type"] == "aws_access_key" and s["source"].endswith("old.js") for s in report["secrets"])
+
+    assert "archive: 3 urls, 1 new JS" in format_summary(report, tmp_path / "r.json")
+
+
+async def test_recon_without_archive_flag_has_no_archive_section(tmp_path):
+    async with HttpClient(transport=httpx.MockTransport(_handler), log_path=tmp_path / "l.jsonl") as c:
+        report = await run_recon(c, BASE + "/")  # include_archive defaults to False
+    assert report["archive"] == {}
+    assert "archive:" not in format_summary(report, tmp_path / "r.json")
