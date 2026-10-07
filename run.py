@@ -128,12 +128,19 @@ def check():
             print(f"[--] {label:16} -> {type(e).__name__}: {e}")
 
 
-async def recon(seed_url: str, portscan: dict | None = None) -> None:
+async def recon(
+    seed_url: str,
+    portscan: dict | None = None,
+    include_dns: bool = False,
+    include_archive: bool = False,
+) -> None:
     from agent.http import HttpClient
     from agent.recon.pipeline import format_summary, run_recon, write_report
 
     async with HttpClient() as client:
-        report = await run_recon(client, seed_url, include_dns=True, portscan=portscan)
+        report = await run_recon(
+            client, seed_url, include_dns=include_dns, portscan=portscan, include_archive=include_archive
+        )
     print(format_summary(report, write_report(report)))
 
 
@@ -171,6 +178,10 @@ if __name__ == "__main__":
     ap.add_argument("--portscan", action="store_true", help="with --recon: nmap -sV scan via Kali WSL (opt-in)")
     ap.add_argument("--ports", help="with --portscan: port spec, e.g. 80,443,8080 or 1-1000 (default: nmap top-1000)")
     ap.add_argument("--timing", type=int, default=3, help="with --portscan: nmap timing 0-3 (default 3; higher is rejected)")
+    ap.add_argument("--dns", action="store_true", help="with --recon: DNS records, SPF/DMARC, CNAME chain, wildcard check (opt-in)")
+    ap.add_argument("--archive", action="store_true",
+                    help="with --recon: pull historical URLs from Wayback Machine + URLScan.io, "
+                         "feed new in-scope JS through the same extraction pipeline (opt-in)")
     a = ap.parse_args()
 
     if (a.ports is not None or a.timing != 3) and not a.portscan:
@@ -184,6 +195,11 @@ if __name__ == "__main__":
             validate_ports(a.ports)
         except ValueError as e:
             ap.error(str(e))
+
+    if a.dns and not a.recon:
+        ap.error("--dns requires --recon")
+    if a.archive and not a.recon:
+        ap.error("--archive requires --recon")
 
     if a.scope:
         set_scope(h.strip() for h in a.scope.split(",") if h.strip())
@@ -205,4 +221,9 @@ if __name__ == "__main__":
         # Pre-scan gate. Refuses if no scope came from config or flags.
         confirm_scope()
         if a.recon:
-            asyncio.run(recon(a.recon, {"ports": a.ports, "timing": a.timing} if a.portscan else None))
+            asyncio.run(recon(
+                a.recon,
+                {"ports": a.ports, "timing": a.timing} if a.portscan else None,
+                include_dns=a.dns,
+                include_archive=a.archive,
+            ))
