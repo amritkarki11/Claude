@@ -1,0 +1,22 @@
+# Server-Side Request Forgery: inject internal URLs into parameters
+# and check if the server fetches them, leaking internal data.
+id: ssrf-internal
+applies_to:
+  - api
+  - web
+tech_signals:
+  - rest-api
+  - url-parameter
+preconditions:
+  - an endpoint accepts a URL or hostname as input
+detect:
+  - step: "Identify parameters that accept URL-like values"
+  - step: "Inject internal IP addresses (127.0.0.1, metadata endpoints)"
+    method: GET
+  - step: "Compare response with baseline for content differences or metadata signatures"
+  - step: "Try IP encoding bypasses if initial probes are filtered"
+signal: "The response contains cloud metadata signatures, internal page content, or significant content differences from baseline"
+verify: "Replay the probe URL and confirm the same internal signature appears while absent from baseline requests"
+severity: high
+remediation: "Validate and allowlist destination URLs server-side; block requests to internal/private IP ranges; disable unnecessary URL schemes; use a dedicated egress proxy for outbound requests"
+source: "CWE-918 (Server-Side Request Forgery)"

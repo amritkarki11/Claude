@@ -62,6 +62,45 @@ async def test_recon_combined_report(tmp_path):
     assert "2 pages" in format_summary(report, path)
 
 
+async def test_recon_runs_authenticated_with_session_and_never_logs_it(tmp_path):
+    """The Session's auth is carried on every pipeline request (crawl + JS
+    fetch), and the raw credential never ends up in the report or the HTTP
+    request log."""
+    from agent.http import Session
+
+    seen_auth: list[str | None] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen_auth.append(req.headers.get("authorization"))
+        html = {"headers": {"content-type": "text/html"}}
+        if req.url.path == "/":
+            return httpx.Response(200, text='<script src="/static/app.js"></script>', **html)
+        if req.url.path == "/static/app.js":
+            return httpx.Response(200, text="fetch('/api/x')", headers={"content-type": "text/javascript"})
+        return httpx.Response(404)
+
+    log_path = tmp_path / "l.jsonl"
+    session = Session(bearer="tok-secret-value")
+    async with HttpClient(transport=httpx.MockTransport(handler), log_path=log_path) as c:
+        report = await run_recon(c, BASE + "/", session=session)
+
+    assert seen_auth and all(a == "Bearer tok-secret-value" for a in seen_auth)
+    assert "tok-secret-value" not in json.dumps(report)
+    assert "tok-secret-value" not in log_path.read_text(encoding="utf-8")
+
+
+async def test_recon_unauthenticated_sends_no_auth_header(tmp_path):
+    seen_auth: list[str | None] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen_auth.append(req.headers.get("authorization"))
+        return httpx.Response(200, text="<html></html>", headers={"content-type": "text/html"})
+
+    async with HttpClient(transport=httpx.MockTransport(handler), log_path=tmp_path / "l.jsonl") as c:
+        await run_recon(c, BASE + "/")
+    assert all(a is None for a in seen_auth)
+
+
 def test_extract_chunk_refs():
     from agent.recon.pipeline import extract_chunk_refs
 

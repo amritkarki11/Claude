@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import sys
 
+from agent.http import Session
 from agent.router import ask
 from agent.scope import ALLOWED, add_to_scope, host_of, set_scope
 
@@ -116,6 +117,33 @@ def resolve_scope_mode(a, enumerate_fn=None, ask=input) -> None:
             add_to_scope(h)
 
 
+def build_session(cookie: str | None, headers: list[str] | None, bearer: str | None) -> Session:
+    """Build a Session (agent/http.py) from CLI-supplied auth material, so
+    the entire recon pipeline (crawler, JS fetching, archive fetch, ...)
+    runs as the logged-in user. Raises ValueError on a malformed --header/
+    --cookie entry -- the message never echoes the offending value, since
+    it may itself be a credential."""
+    cookies: dict[str, str] = {}
+    if cookie:
+        for pair in cookie.split(";"):
+            pair = pair.strip()
+            if not pair:
+                continue
+            name, sep, value = pair.partition("=")
+            if not sep or not name.strip():
+                raise ValueError("--cookie entries must be 'name=value' pairs separated by ';'")
+            cookies[name.strip()] = value.strip()
+
+    hdrs: dict[str, str] = {}
+    for h in headers or []:
+        name, sep, value = h.partition(":")
+        if not sep or not name.strip():
+            raise ValueError("--header entries must be 'Name: Value'")
+        hdrs[name.strip()] = value.strip()
+
+    return Session(bearer=bearer, headers=hdrs, cookies=cookies)
+
+
 def check():
     print(f"[scope] allowlist: {sorted(ALLOWED)}")
     for job, label in [("triage", "LOCAL  (ollama)"),
@@ -133,13 +161,19 @@ async def recon(
     portscan: dict | None = None,
     include_dns: bool = False,
     include_archive: bool = False,
+    session: Session | None = None,
 ) -> None:
     from agent.http import HttpClient
     from agent.recon.pipeline import format_summary, run_recon, write_report
 
+    # Unambiguous: never leaves it implicit whether requests carry credentials.
+    # Only the mode is printed -- the raw cookie/header/bearer values are not.
+    print(f"[recon] mode: {'AUTHENTICATED' if session is not None else 'UNAUTHENTICATED'}")
+
     async with HttpClient() as client:
         report = await run_recon(
-            client, seed_url, include_dns=include_dns, portscan=portscan, include_archive=include_archive
+            client, seed_url, include_dns=include_dns, portscan=portscan,
+            include_archive=include_archive, session=session,
         )
     print(format_summary(report, write_report(report)))
 
@@ -182,6 +216,12 @@ if __name__ == "__main__":
     ap.add_argument("--archive", action="store_true",
                     help="with --recon: pull historical URLs from Wayback Machine + URLScan.io, "
                          "feed new in-scope JS through the same extraction pipeline (opt-in)")
+    ap.add_argument("--cookie", metavar="\"name=value; name2=value2\"",
+                    help="with --recon: run authenticated, sending this Cookie header on every request")
+    ap.add_argument("--header", action="append", metavar="\"Name: Value\"",
+                    help="with --recon: run authenticated, sending this header on every request (repeatable)")
+    ap.add_argument("--bearer", metavar="TOKEN",
+                    help="with --recon: run authenticated, sending 'Authorization: Bearer TOKEN' on every request")
     a = ap.parse_args()
 
     if (a.ports is not None or a.timing != 3) and not a.portscan:
@@ -200,6 +240,15 @@ if __name__ == "__main__":
         ap.error("--dns requires --recon")
     if a.archive and not a.recon:
         ap.error("--archive requires --recon")
+
+    session = None
+    if a.cookie or a.header or a.bearer:
+        if not a.recon:
+            ap.error("--cookie/--header/--bearer require --recon")
+        try:
+            session = build_session(a.cookie, a.header, a.bearer)
+        except ValueError as e:
+            ap.error(str(e))
 
     if a.scope:
         set_scope(h.strip() for h in a.scope.split(",") if h.strip())
@@ -226,4 +275,5 @@ if __name__ == "__main__":
                 {"ports": a.ports, "timing": a.timing} if a.portscan else None,
                 include_dns=a.dns,
                 include_archive=a.archive,
+                session=session,
             ))

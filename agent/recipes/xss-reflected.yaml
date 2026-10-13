@@ -1,0 +1,22 @@
+# Reflected Cross-Site Scripting: inject HTML/JS payloads into parameters
+# and check if they appear unencoded in the response body.
+id: xss-reflected
+applies_to:
+  - api
+  - web
+tech_signals:
+  - rest-api
+  - html-response
+preconditions:
+  - an endpoint reflects user input in the response body
+detect:
+  - step: "Identify parameters by injecting a unique canary string"
+  - step: "If canary is reflected, inject HTML/JS payloads"
+    method: GET
+  - step: "Check if payloads appear unencoded in the response"
+  - step: "Check for missing Content-Security-Policy header"
+signal: "An injected script or event-handler payload appears unencoded in the HTML response"
+verify: "Replay the exact payload and confirm it still appears unencoded in the response body across multiple attempts"
+severity: high
+remediation: "HTML-encode all user-supplied output; implement a strict Content-Security-Policy; use framework auto-escaping features"
+source: "CWE-79 (Cross-site Scripting)"

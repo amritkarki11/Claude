@@ -28,8 +28,14 @@ from .http import HttpClient, Session
 from .scope import check as scope_check, add_to_scope, ScopeError
 from .scanners.base import Scanner, Candidate
 from .scanners.idor import IdorScanner
+from .scanners.sqli import SqliScanner
+from .scanners.xss import XssScanner
+from .scanners.ssrf import SsrfScanner
 from .verify.base import Verifier, Verdict, VerifyResult
 from .verify.idor import IdorVerifier
+from .verify.sqli import SqliVerifier
+from .verify.xss import XssVerifier
+from .verify.ssrf import SsrfVerifier
 from .kb.retriever import Retriever, RetrievalResult
 from .recipes.schema import Recipe
 
@@ -222,6 +228,11 @@ class Orchestrator:
         # Register built-in scanners
         self.registry.register("idor", IdorScanner)
         self.registry.register("bola", IdorScanner)
+        self.registry.register("sqli", SqliScanner)
+        self.registry.register("sql-injection", SqliScanner)
+        self.registry.register("xss", XssScanner)
+        self.registry.register("reflected-xss", XssScanner)
+        self.registry.register("ssrf", SsrfScanner)
 
     async def run(self, target: str) -> TargetState:
         """Execute the full orchestration loop on a target.
@@ -350,6 +361,8 @@ class Orchestrator:
                         victim_ids=self.config.victim_ids,
                         id_param=self.config.id_param,
                         id_location=self.config.id_location or ep.method,
+                        params=ep.params,
+                        method=ep.method,
                     )
                     self.state.candidate_queue.extend(candidates)
                     self.state.scans_run += 1
@@ -367,6 +380,9 @@ class Orchestrator:
                 self.config.attacker_session,
                 self.config.victim_session,
             )
+        # Single-session scanners (SQLi, XSS, SSRF)
+        if scanner_cls in (SqliScanner, XssScanner, SsrfScanner):
+            return scanner_cls(self.client, self.config.attacker_session)
         # Generic fallback for future scanners
         return scanner_cls(self.client)
 
@@ -400,6 +416,12 @@ class Orchestrator:
         """Pick the right verifier for a candidate."""
         if candidate.scanner == "IdorScanner":
             return IdorVerifier(self.client, self.config.attacker_session)
+        if candidate.scanner == "SqliScanner":
+            return SqliVerifier(self.client, self.config.attacker_session)
+        if candidate.scanner == "XssScanner":
+            return XssVerifier(self.client, self.config.attacker_session)
+        if candidate.scanner == "SsrfScanner":
+            return SsrfVerifier(self.client, self.config.attacker_session)
         return None
 
     def _write_human_queue(self) -> None:

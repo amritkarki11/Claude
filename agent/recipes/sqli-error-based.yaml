@@ -1,0 +1,22 @@
+# SQL Injection via error-based detection: inject SQL-breaking characters
+# into parameters and check for database error messages in the response.
+id: sqli-error-based
+applies_to:
+  - api
+  - web
+tech_signals:
+  - rest-api
+  - sql-database
+preconditions:
+  - an endpoint accepts user-supplied input in query, body, or path parameters
+detect:
+  - step: "Identify input parameters that may flow into SQL queries"
+  - step: "Inject single quote and SQL syntax payloads into each parameter"
+    method: GET
+  - step: "Check response body for database error signatures (MySQL, PostgreSQL, etc.)"
+  - step: "If error found, record the payload and error signature for verification"
+signal: "The response contains a database error message triggered by the injected payload"
+verify: "Replay the exact payload and confirm the same database error string appears in the response across multiple attempts"
+severity: critical
+remediation: "Use parameterized queries / prepared statements for all database interactions; never concatenate user input into SQL strings; apply input validation as a defense-in-depth measure"
+source: "CWE-89 (SQL Injection)"

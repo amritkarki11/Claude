@@ -19,6 +19,7 @@ import json
 import re
 import subprocess
 
+from ..http import Session
 from ..scope import check as scope_check
 from ..scope import host_of
 
@@ -55,9 +56,12 @@ def validate_status_codes(codes: str) -> str:
     return codes
 
 
-def build_command(target: str, wordlist: str, rate: int, threads: int, status_codes: str) -> list[str]:
+def build_command(
+    target: str, wordlist: str, rate: int, threads: int, status_codes: str,
+    session: Session | None = None,
+) -> list[str]:
     url = f"{target.rstrip('/')}/FUZZ"
-    return [
+    cmd = [
         "wsl", "-d", WSL_DISTRO, "-u", "root", "--",
         "ffuf", "-u", url, "-w", wordlist,
         "-of", "json", "-o", "-",
@@ -65,6 +69,17 @@ def build_command(target: str, wordlist: str, rate: int, threads: int, status_co
         "-mc", status_codes,
         "-s",  # silent: no banner/progress mixed into the JSON on stdout
     ]
+    if session is not None:
+        # Authenticated fuzzing: run every request as the logged-in user,
+        # same auth material the HTTP engine's Session carries elsewhere.
+        headers: dict[str, str] = {}
+        cookies: dict[str, str] = {}
+        session.apply(headers, cookies)
+        for name, value in headers.items():
+            cmd += ["-H", f"{name}: {value}"]
+        if cookies:
+            cmd += ["-b", "; ".join(f"{k}={v}" for k, v in cookies.items())]
+    return cmd
 
 
 def parse_ffuf_json(json_text: str) -> list[dict]:
@@ -116,11 +131,17 @@ async def fuzz_directories(
     rate: int = DEFAULT_RATE,
     threads: int = DEFAULT_THREADS,
     status_codes: str = DEFAULT_STATUS_CODES,
+    session: Session | None = None,
     runner=None,
 ) -> dict:
     """Fuzz `target` (a URL; its host must be in scope). Raises ScopeError /
     ValueError for bad input; environment failures are returned as
-    {"ok": False, "error", "hint"} rather than raised."""
+    {"ok": False, "error", "hint"} rather than raised.
+
+    `session`, if given, is the same agent.http.Session used by the rest of
+    the recon pipeline -- its cookies/headers/bearer are sent on every ffuf
+    request too, so fuzzing runs as the logged-in user. Never echoed into
+    the returned result; only ffuf's own process sees the raw values."""
     rate = validate_rate(rate)
     threads = validate_threads(threads)
     status_codes = validate_status_codes(status_codes)
@@ -129,7 +150,7 @@ async def fuzz_directories(
     host = host_of(target)
     scope_check(host)  # fail closed before anything touches the network
 
-    cmd = build_command(target, wordlist, rate, threads, status_codes)
+    cmd = build_command(target, wordlist, rate, threads, status_codes, session=session)
     try:
         proc = await asyncio.to_thread(runner or _run, cmd)
     except FileNotFoundError:

@@ -6,6 +6,7 @@ from types import SimpleNamespace as NS
 
 import pytest
 
+from agent.http import Session
 from agent.recon import dir_fuzz
 from agent.scope import ALLOWED, ScopeError
 
@@ -92,6 +93,31 @@ async def test_fuzz_allows_wordlist_rate_threads_override():
     assert cmd[cmd.index("-w") + 1] == "/tmp/custom.txt"
     assert cmd[cmd.index("-rate") + 1] == "5"
     assert cmd[cmd.index("-t") + 1] == "3"
+
+
+# ---------- authenticated fuzzing: Session carried through to ffuf ----------
+
+def test_build_command_includes_session_headers_and_cookies():
+    session = Session(bearer="tok123", headers={"X-Api-Key": "k"}, cookies={"sid": "abc"})
+    cmd = dir_fuzz.build_command(TARGET, "/wl.txt", 10, 5, "200", session=session)
+    h_values = [cmd[i + 1] for i, v in enumerate(cmd) if v == "-H"]
+    assert "Authorization: Bearer tok123" in h_values
+    assert "X-Api-Key: k" in h_values
+    assert cmd[cmd.index("-b") + 1] == "sid=abc"
+
+
+def test_build_command_without_session_has_no_auth_flags():
+    cmd = dir_fuzz.build_command(TARGET, "/wl.txt", 10, 5, "200")
+    assert "-H" not in cmd and "-b" not in cmd
+
+
+async def test_fuzz_directories_threads_session_into_ffuf_command():
+    calls = []
+    session = Session(jsessionid="sess-secret-value")
+    out = await dir_fuzz.fuzz_directories(TARGET, session=session, runner=_runner(calls=calls))
+    assert out["ok"]
+    cmd = calls[0]
+    assert cmd[cmd.index("-b") + 1] == "JSESSIONID=sess-secret-value"
 
 
 # ---------- rate/thread caps: rejected, not silently clamped ----------
