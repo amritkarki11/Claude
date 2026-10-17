@@ -69,16 +69,18 @@ class SsrfScanner(Scanner):
         if use_bypasses:
             probe_targets.extend(_BYPASS_TARGETS)
 
+        siblings = context.get("siblings", {})
         for param in params:
             # Get baseline for comparison
             baseline = await self._get_baseline(
-                target, param, method, id_location
+                target, param, method, id_location, siblings=siblings
             )
 
             for ssrf_url in probe_targets:
                 try:
                     result = await self._probe(
-                        target, param, ssrf_url, method, id_location, baseline
+                        target, param, ssrf_url, method, id_location, baseline,
+                        siblings=siblings,
                     )
                     if result:
                         candidates.append(
@@ -107,8 +109,10 @@ class SsrfScanner(Scanner):
 
     async def _probe(self, target: str, param: str, ssrf_url: str,
                      method: str, id_location: str,
-                     baseline: dict | None) -> dict | None:
-        resp = await self._send(target, param, ssrf_url, method, id_location)
+                     baseline: dict | None,
+                     *, siblings: dict[str, str] | None = None) -> dict | None:
+        resp = await self._send(target, param, ssrf_url, method, id_location,
+                                siblings=siblings)
         body = resp.text[:3000].lower()
 
         # Check for SSRF signatures in response
@@ -143,10 +147,12 @@ class SsrfScanner(Scanner):
         return None
 
     async def _get_baseline(self, target: str, param: str,
-                            method: str, id_location: str) -> dict | None:
+                            method: str, id_location: str,
+                            *, siblings: dict[str, str] | None = None) -> dict | None:
         try:
             resp = await self._send(
-                target, param, "benign_test_value_12345", method, id_location
+                target, param, "benign_test_value_12345", method, id_location,
+                siblings=siblings,
             )
             return {
                 "status": resp.status_code,

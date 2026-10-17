@@ -205,9 +205,11 @@ class CmdiScanner(Scanner):
                     candidates.append(result)
         else:
             # Fallback: test all params (legacy mode)
+            siblings = context.get("siblings", {})
             for param in params:
                 result = await self._test_param(
-                    target, param, method, id_location, recipe
+                    target, param, method, id_location, recipe,
+                    siblings=siblings,
                 )
                 if result:
                     candidates.append(result)

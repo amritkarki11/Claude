@@ -100,8 +100,10 @@ class XssScanner(Scanner):
                         )
                     )
         else:
+            siblings = context.get("siblings", {})
             for param in params:
-                result = await self._probe(target, param, method, id_location)
+                result = await self._probe(target, param, method, id_location,
+                                           siblings=siblings)
                 if result and result.get("confirmed"):
                     candidates.append(
                         self._make_candidate(

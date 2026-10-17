@@ -119,9 +119,10 @@ class StoredXssScanner(Scanner):
                         },
                     ))
         else:
+            siblings = context.get("siblings", {})
             for param in params:
                 result = await self._probe_stored(
-                    target, param, method, {}, render_urls,
+                    target, param, method, siblings, render_urls,
                 )
                 if result:
                     candidates.append(self._make_candidate(

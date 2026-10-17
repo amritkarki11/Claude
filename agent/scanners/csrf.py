@@ -90,10 +90,15 @@ class CsrfScanner(Scanner):
                 if _CSRF_FIELD_NAMES.match(sib_name):
                     csrf_field = sib_name
         else:
+            siblings = context.get("siblings", {})
+            form_data.update(siblings)
             for param in params:
                 form_data[param] = "test_value"
                 if _CSRF_FIELD_NAMES.match(param):
                     csrf_field = param
+            for sib_name in list(siblings.keys()):
+                if _CSRF_FIELD_NAMES.match(sib_name):
+                    csrf_field = sib_name
 
         # ── Step 1: TOKEN_CHECK — is there a CSRF token? ──
         has_token_field = csrf_field is not None

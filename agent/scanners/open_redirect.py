@@ -121,10 +121,11 @@ class OpenRedirectScanner(Scanner):
                     ))
         else:
             # Only test params whose names suggest redirect targets
+            siblings = context.get("siblings", {})
             for param in params:
                 if not _REDIRECT_PARAMS.match(param):
                     continue
-                result = await self._probe(target, param, method, id_location, {})
+                result = await self._probe(target, param, method, id_location, siblings)
                 if result:
                     candidates.append(self._make_candidate(
                         recipe=recipe, endpoint=target, method=method,

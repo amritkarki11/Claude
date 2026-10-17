@@ -239,9 +239,11 @@ class LfiScanner(Scanner):
                 if result:
                     candidates.append(result)
         else:
+            siblings = context.get("siblings", {})
             for param in params:
                 result = await self._test_param(
-                    target, param, method, id_location, recipe
+                    target, param, method, id_location, recipe,
+                    siblings=siblings,
                 )
                 if result:
                     candidates.append(result)
