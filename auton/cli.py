@@ -16,6 +16,12 @@ from rich.console import Console
 from rich.prompt import Prompt
 
 from auton.ui.banner import print_banner
+from auton.ui.results import (
+    print_recon_summary,
+    print_endpoint_classification,
+    print_finding,
+    print_scan_summary,
+)
 from auton.router.parser import (
     parse,
     print_commands_table,
@@ -84,8 +90,7 @@ async def _async_recon(target: str, is_wildcard: bool, allports: bool,
             report = await run_recon(client, seed_url)
         if report:
             path = write_report(report)
-            console.print(f"\n{format_summary(report, path)}")
-            console.print()
+            print_recon_summary(report, str(path), console)
     except ImportError as exc:
         console.print(f"  [yellow]Recon pipeline not available: {exc}[/yellow]")
         console.print("  [dim]Nmap scan completed above.[/dim]\n")
@@ -219,12 +224,12 @@ async def _async_fullscan(target: str, is_wildcard: bool, allports: bool,
         return
 
     seed_url = report["seed"]
+
+    # Show endpoint classification table
+    print_endpoint_classification(scan_targets, console)
+
     console.print(
-        f"\n[bold bright_magenta]— Vulnerability Scan: {report['host']} —[/bold bright_magenta]"
-    )
-    console.print(
-        f"  [dim]{len(scan_targets)} injectable targets "
-        f"({sum(len(t['params']) for t in scan_targets)} total params)[/dim]"
+        f"[bold orange1]  VULNERABILITY SCAN: {report['host']}[/bold orange1]"
     )
 
     scanner_classes = [
@@ -236,6 +241,7 @@ async def _async_fullscan(target: str, is_wildcard: bool, allports: bool,
     load_result = load_recipes()
     recipes = load_result.recipes
     all_candidates = []
+    finding_num = 0
 
     session = Session()
 
@@ -264,10 +270,12 @@ async def _async_fullscan(target: str, is_wildcard: bool, allports: bool,
                         if candidates:
                             all_candidates.extend(candidates)
                             for c in candidates:
+                                finding_num += 1
                                 console.print(
-                                    f"  [bright_magenta][{name}][/bright_magenta] "
-                                    f"[yellow]{c.confidence}[/yellow] — {c.endpoint}"
+                                    f"  [green]/ AUTON[/green] | "
+                                    f"[white]Finding confirmed — {name} on {c.endpoint}[/white]"
                                 )
+                                print_finding(finding_num, c, console)
             except Exception as exc:
                 console.print(f"  [red]{name} error: {exc}[/red]")
 
@@ -295,22 +303,16 @@ async def _async_fullscan(target: str, is_wildcard: bool, allports: bool,
                     if candidates:
                         all_candidates.extend(candidates)
                         for c in candidates:
+                            finding_num += 1
                             console.print(
-                                f"  [bright_magenta][IDOR][/bright_magenta] "
-                                f"[yellow]{c.confidence}[/yellow] — {c.endpoint}"
+                                f"  [green]/ AUTON[/green] | "
+                                f"[white]Finding confirmed — IDOR on {c.endpoint}[/white]"
                             )
+                            print_finding(finding_num, c, console)
         except Exception as exc:
             console.print(f"  [red]IDOR error: {exc}[/red]")
 
-    if all_candidates:
-        console.print(
-            f"\n[bold green]{len(all_candidates)} candidate findings "
-            f"(unverified) — run verifiers next.[/bold green]\n"
-        )
-    else:
-        console.print(
-            "\n[bold bright_cyan]No candidate findings from scanners.[/bold bright_cyan]\n"
-        )
+    print_scan_summary(all_candidates, console)
 
 
 def _run_fullscan(target: str, is_wildcard: bool, allports: bool,
