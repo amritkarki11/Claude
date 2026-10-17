@@ -1,9 +1,5 @@
 """Slash-command parser — deterministic routing for the interactive shell.
 
-Accepts: /commands, /recon, /fullscan, /exit
-Flags:   /allports, --no-dog
-Target:  single domain or *.domain for wildcard subdomain enumeration.
-
 100% deterministic Python. No LLMs. No APIs.
 """
 from __future__ import annotations
@@ -34,7 +30,21 @@ def _normalize_target(raw_target: str) -> str:
         return raw_target.split("/")[0]
     return raw_target
 
-# The 14 scanner names from agent/scanners/
+
+_SCANNER_MAP = {
+    "sqli": "SqliScanner",
+    "xss": "XssScanner",
+    "ssrf": "SsrfScanner",
+    "idor": "IdorScanner",
+    "nosqli": "NosqliScanner",
+    "ssti": "SstiScanner",
+    "cmdi": "CmdiScanner",
+    "lfi": "LfiScanner",
+    "csrf": "CsrfScanner",
+    "storedxss": "StoredXssScanner",
+    "redirect": "OpenRedirectScanner",
+}
+
 _SCANNER_NAMES = [
     "SQLi", "XSS", "SSRF", "IDOR/BOLA", "NoSQLi", "SSTI",
     "CMDi", "LFI", "CSRF", "Stored XSS", "Open Redirect",
@@ -45,23 +55,18 @@ _SCANNER_NAMES = [
 @dataclass
 class ParsedCommand:
     """Result of parsing a slash command."""
-    action: str  # "commands", "recon", "fullscan", "exit", "unknown"
+    action: str  # commands, recon, fullscan, nmap, scan_single, exit, unknown
     target: str = ""
     is_wildcard: bool = False
     allports: bool = False
+    nmap: bool = False
+    scanner: str = ""
     raw_input: str = ""
     error: str = ""
 
 
 def parse(raw: str) -> ParsedCommand:
-    """Parse a raw input line into a structured command.
-
-    Grammar:
-        /commands
-        /recon  [/allports] <target>
-        /fullscan [/allports] <target>
-        /exit
-    """
+    """Parse a raw input line into a structured command."""
     raw = raw.strip()
     if not raw:
         return ParsedCommand(action="unknown", raw_input=raw, error="Empty input.")
@@ -74,71 +79,69 @@ def parse(raw: str) -> ParsedCommand:
     if not tokens:
         return ParsedCommand(action="unknown", raw_input=raw, error="Empty input.")
 
-    cmd = tokens[0].lower()
+    cmd = tokens[0].lower().lstrip("/")
 
-    if cmd == "/exit":
+    if cmd == "exit":
         return ParsedCommand(action="exit", raw_input=raw)
 
-    if cmd == "/commands":
+    if cmd == "commands":
         return ParsedCommand(action="commands", raw_input=raw)
 
-    if cmd in ("/recon", "/fullscan"):
-        action = cmd.lstrip("/")
-        allports = False
-        target = ""
+    if cmd == "nmap":
+        return _parse_target_cmd("nmap", tokens[1:], raw)
 
-        remaining = tokens[1:]
-        for tok in remaining:
-            if tok.lower() == "/allports":
-                allports = True
-            elif not tok.startswith("/") and not tok.startswith("--"):
-                target = tok
+    if cmd in ("recon", "fullscan"):
+        return _parse_target_cmd(cmd, tokens[1:], raw)
 
-        if not target:
-            return ParsedCommand(
-                action=action, raw_input=raw,
-                error=f"Missing target. Usage: {cmd} [/allports] <target>",
-            )
-
-        target = _normalize_target(target)
-        is_wildcard = target.startswith("*.")
-
-        return ParsedCommand(
-            action=action,
-            target=target,
-            is_wildcard=is_wildcard,
-            allports=allports,
-            raw_input=raw,
-        )
+    if cmd in _SCANNER_MAP:
+        return _parse_target_cmd("scan_single", tokens[1:], raw, scanner=cmd)
 
     return ParsedCommand(
         action="unknown", raw_input=raw,
-        error=f"Unknown command: {cmd!r}. Type /commands for help.",
+        error=f"Unknown command: /{cmd}. Type /commands for help.",
     )
 
 
-def route_input(user_input: str) -> tuple[str, str]:
-    """Hybrid router: slash commands pass through, natural language goes to LLM.
+def _parse_target_cmd(action: str, remaining: list[str], raw: str,
+                      scanner: str = "") -> ParsedCommand:
+    """Parse target + flags for recon/fullscan/nmap/scanner commands."""
+    allports = False
+    nmap = False
+    target = ""
 
-    Returns (type, content):
-      ("command", "/recon example.com")  — execute this command
-      ("chat", "Hello! I'm AUTON...")    — display this response
-      ("error", "Ollama not running")    — display this error
-    """
-    stripped = user_input.strip()
-    if not stripped:
-        return ("command", stripped)
-    if stripped.startswith("/"):
-        return ("command", stripped)
+    for tok in remaining:
+        low = tok.lower().lstrip("/")
+        if low == "allports":
+            allports = True
+        elif low == "nmap":
+            nmap = True
+        elif not tok.startswith("/") and not tok.startswith("--"):
+            target = tok
 
-    from auton.core.translator import translate
-    return translate(stripped)
+    if not target:
+        label = f"/{scanner}" if scanner else f"/{action}"
+        return ParsedCommand(
+            action=action, raw_input=raw,
+            error=f"Missing target. Usage: {label} <target>",
+        )
+
+    target = _normalize_target(target)
+    is_wildcard = target.startswith("*.")
+
+    if action == "nmap":
+        nmap = True
+
+    return ParsedCommand(
+        action=action, target=target, is_wildcard=is_wildcard,
+        allports=allports, nmap=nmap, scanner=scanner, raw_input=raw,
+    )
 
 
 def print_commands_table(console: Console | None = None) -> None:
-    """Print the rich table of all available commands and flags."""
+    """Print the rich table of all available commands."""
     con = console or Console()
 
+    # Main commands
     tbl = Table(
         title="[bold bright_cyan]AUTON Commands[/bold bright_cyan]",
         title_style="bold",
@@ -147,38 +150,49 @@ def print_commands_table(console: Console | None = None) -> None:
         show_lines=True,
         expand=False,
     )
-    tbl.add_column("Command", style="bold bright_cyan", min_width=28)
+    tbl.add_column("Command", style="bold bright_cyan", min_width=34)
     tbl.add_column("Description", style="white")
 
-    tbl.add_row(
-        "/commands",
-        "Show this help table",
-    )
-    tbl.add_row(
-        "/recon <target>",
-        "Recon only: Nmap + directory fuzzing + JS extraction",
-    )
-    tbl.add_row(
-        "/recon /allports <target>",
-        "Recon with full 65535-port Nmap scan",
-    )
-    tbl.add_row(
-        "/fullscan <target>",
-        "Full scan: recon + all 14 vulnerability scanners",
-    )
-    tbl.add_row(
-        "/fullscan /allports <target>",
-        "Full scan with all-ports Nmap",
-    )
-    tbl.add_row(
-        "/exit",
-        "Exit the AUTON shell",
-    )
+    tbl.add_row("/recon <target>", "Crawl + JS analysis + secrets (no nmap)")
+    tbl.add_row("/recon <target> /nmap", "Recon with nmap port scan")
+    tbl.add_row("/recon <target> /nmap /allports", "Recon with nmap all 65535 ports")
+    tbl.add_row("/fullscan <target>", "Recon + all vulnerability scanners")
+    tbl.add_row("/fullscan <target> /nmap", "Full scan with nmap")
+    tbl.add_row("/nmap <target>", "Standalone nmap scan (top 1000 ports)")
+    tbl.add_row("/nmap <target> /allports", "Nmap all 65535 ports")
+    tbl.add_row("/commands", "Show this help table")
+    tbl.add_row("/exit", "Exit the AUTON shell")
 
     con.print()
     con.print(tbl)
 
-    # Flags sub-table
+    # Individual scanners
+    scan_tbl = Table(
+        title="[bold bright_cyan]Individual Scanners[/bold bright_cyan]",
+        border_style="bright_blue",
+        header_style="bold bright_magenta",
+        show_lines=True,
+        expand=False,
+    )
+    scan_tbl.add_column("Command", style="bold green", min_width=28)
+    scan_tbl.add_column("Vulnerability", style="white")
+
+    scan_tbl.add_row("/sqli <target>", "SQL Injection")
+    scan_tbl.add_row("/xss <target>", "Reflected XSS")
+    scan_tbl.add_row("/storedxss <target>", "Stored XSS")
+    scan_tbl.add_row("/ssrf <target>", "Server-Side Request Forgery")
+    scan_tbl.add_row("/idor <target>", "IDOR / Broken Object-Level Auth")
+    scan_tbl.add_row("/nosqli <target>", "NoSQL Injection")
+    scan_tbl.add_row("/ssti <target>", "Server-Side Template Injection")
+    scan_tbl.add_row("/cmdi <target>", "OS Command Injection")
+    scan_tbl.add_row("/lfi <target>", "Local File Inclusion")
+    scan_tbl.add_row("/csrf <target>", "Cross-Site Request Forgery")
+    scan_tbl.add_row("/redirect <target>", "Open Redirect")
+
+    con.print()
+    con.print(scan_tbl)
+
+    # Flags
     flags_tbl = Table(
         title="[bold bright_cyan]Flags[/bold bright_cyan]",
         border_style="yellow",
@@ -189,20 +203,12 @@ def print_commands_table(console: Console | None = None) -> None:
     flags_tbl.add_column("Flag", style="bold green", min_width=16)
     flags_tbl.add_column("Effect", style="white")
 
-    flags_tbl.add_row("/allports", "Nmap scans all 65535 ports (-p-) instead of top 1000")
-    flags_tbl.add_row("*.domain", "Wildcard target — enumerate subdomains first, then scan each live host")
-    flags_tbl.add_row("--no-dog", "Disable the running-dog animation (CLI flag)")
+    flags_tbl.add_row("/nmap", "Add nmap port scan to recon/fullscan")
+    flags_tbl.add_row("/allports", "Nmap scans all 65535 ports instead of top 1000")
+    flags_tbl.add_row("*.domain", "Wildcard — enumerate subdomains first")
 
     con.print()
     con.print(flags_tbl)
-
-    # Scanners
-    con.print()
-    con.print("[bold dark_orange]Scanners (14):[/bold dark_orange]")
-    scanners_text = "  " + "  |  ".join(
-        f"[bright_magenta]{s}[/bright_magenta]" for s in _SCANNER_NAMES
-    )
-    con.print(scanners_text)
     con.print()
 
 
@@ -218,10 +224,7 @@ def build_nmap_cmd(target: str, allports: bool = False) -> list[str]:
 
 
 def enumerate_subdomains(wildcard_target: str, console: Console | None = None) -> list[str]:
-    """Enumerate subdomains for a wildcard target like *.example.com.
-
-    Uses DNS brute-force with a small built-in wordlist. Returns live hosts.
-    """
+    """Enumerate subdomains for a wildcard target like *.example.com."""
     con = console or Console()
     base_domain = wildcard_target.lstrip("*.")
 

@@ -1,10 +1,9 @@
 """AUTON interactive REPL — the main entry point.
 
 Launch with: auton
-Inside the shell: /commands, /recon, /fullscan, /exit
+Inside the shell: /commands, /recon, /fullscan, /nmap, /sqli, /xss, etc.
 
-Wires the deterministic slash-command parser to the real agent/ recon pipeline
-and vulnerability scanners. No LLMs, no API keys — routing is 100% deterministic.
+100% deterministic slash-command routing. No LLMs, no API keys.
 """
 from __future__ import annotations
 
@@ -24,10 +23,10 @@ from auton.ui.results import (
 )
 from auton.router.parser import (
     parse,
-    route_input,
     print_commands_table,
     enumerate_subdomains,
     run_nmap,
+    _SCANNER_MAP,
 )
 
 
@@ -50,32 +49,42 @@ def _add_target_to_scope(target: str, console: Console) -> None:
         console.print(f"  [dim]Scope: {h}[/dim]")
 
 
-async def _async_recon(target: str, is_wildcard: bool, allports: bool,
-                       console: Console) -> dict | None:
-    """Run the full recon pipeline from agent/recon/pipeline.py."""
-    _add_target_to_scope(target, console)
-
-    # Subdomain enumeration for wildcard targets
-    targets: list[str] = []
+def _resolve_targets(target: str, is_wildcard: bool, console: Console) -> list[str]:
+    """Resolve target into a list of hosts (with subdomain enum for wildcards)."""
     if is_wildcard:
         _status(console, f"Enumerating subdomains for {target}")
         targets = enumerate_subdomains(target, console=console)
         if not targets:
             console.print("[yellow]No live subdomains found.[/yellow]")
-            return None
-    else:
-        from agent.scope import host_of as _host_of
-        targets = [_host_of(target) or target]
+        return targets
 
-    # Nmap scan
+    from agent.scope import host_of as _host_of
+    return [_host_of(target) or target]
+
+
+def _run_nmap_on_targets(targets: list[str], allports: bool, console: Console) -> None:
+    """Run nmap on each target in the list."""
+    from agent.scope import add_to_scope
     for t in targets:
-        from agent.scope import add_to_scope
         add_to_scope(t)
         _status(console, f"Port scanning {t}")
         nmap_out = run_nmap(t, allports=allports, console=console)
         if nmap_out:
             console.print(f"\n[bold bright_cyan]— Nmap results for {t} —[/bold bright_cyan]")
             console.print(nmap_out)
+
+
+async def _async_recon(target: str, is_wildcard: bool, allports: bool,
+                       use_nmap: bool, console: Console) -> dict | None:
+    """Run the recon pipeline. Nmap only if use_nmap=True."""
+    _add_target_to_scope(target, console)
+
+    targets = _resolve_targets(target, is_wildcard, console)
+    if not targets:
+        return None
+
+    if use_nmap:
+        _run_nmap_on_targets(targets, allports, console)
 
     # Full recon pipeline: crawl + JS extraction + secret scan + sourcemaps
     seed_url = targets[0] if targets else target
@@ -94,7 +103,8 @@ async def _async_recon(target: str, is_wildcard: bool, allports: bool,
             print_recon_summary(report, str(path), console)
     except ImportError as exc:
         console.print(f"  [yellow]Recon pipeline not available: {exc}[/yellow]")
-        console.print("  [dim]Nmap scan completed above.[/dim]\n")
+        if use_nmap:
+            console.print("  [dim]Nmap scan completed above.[/dim]\n")
     except Exception as exc:
         console.print(f"  [red]Recon pipeline error: {exc}[/red]")
 
@@ -102,26 +112,21 @@ async def _async_recon(target: str, is_wildcard: bool, allports: bool,
 
 
 def _run_recon(target: str, is_wildcard: bool, allports: bool,
-               console: Console) -> dict | None:
+               use_nmap: bool, console: Console) -> dict | None:
     """Execute the full recon pipeline (sync wrapper)."""
     return asyncio.run(
-        _async_recon(target, is_wildcard, allports, console)
+        _async_recon(target, is_wildcard, allports, use_nmap, console)
     )
 
 
 def _build_scan_targets(report: dict) -> list[dict]:
-    """Extract scannable targets from the recon report.
-
-    Each target is a dict with: url, params, method, id_location, siblings.
-    Built from forms (primary) and parameterized endpoints (secondary).
-    """
+    """Extract scannable targets from the recon report."""
     from urllib.parse import urljoin
 
     targets: list[dict] = []
     seed_url = report["seed"]
     seen: set[str] = set()
 
-    # Forms — the richest source of injection points
     for form in report.get("forms", []):
         fields = form.get("fields", [])
         param_names = [f["name"] for f in fields if f.get("name")]
@@ -137,7 +142,6 @@ def _build_scan_targets(report: dict) -> list[dict]:
         method = (form.get("method") or "GET").upper()
         id_location = "body" if method == "POST" else "query"
 
-        # Default values for sibling fields so multi-field forms work
         siblings = {}
         for f in fields:
             name = f.get("name", "")
@@ -159,14 +163,10 @@ def _build_scan_targets(report: dict) -> list[dict]:
         seen.add(key)
 
         targets.append({
-            "url": action,
-            "params": param_names,
-            "method": method,
-            "id_location": id_location,
-            "siblings": siblings,
+            "url": action, "params": param_names, "method": method,
+            "id_location": id_location, "siblings": siblings,
         })
 
-    # JS-extracted endpoints that have params
     for ep in report.get("endpoints", []):
         params = ep.get("params", [])
         if not params:
@@ -183,27 +183,32 @@ def _build_scan_targets(report: dict) -> list[dict]:
         seen.add(key)
 
         targets.append({
-            "url": url,
-            "params": params,
-            "method": method,
-            "id_location": "query",
-            "siblings": {},
+            "url": url, "params": params, "method": method,
+            "id_location": "query", "siblings": {},
         })
 
     return targets
 
 
-async def _async_fullscan(target: str, is_wildcard: bool, allports: bool,
-                          console: Console) -> None:
-    """Run recon + all vulnerability scanners."""
-    report = await _async_recon(target, is_wildcard, allports, console)
+def _get_scanner_class(scanner_key: str):
+    """Import and return a single scanner class by key."""
+    from agent.scanners import (
+        SqliScanner, XssScanner, SsrfScanner, IdorScanner,
+        NosqliScanner, SstiScanner, CmdiScanner, LfiScanner,
+        CsrfScanner, StoredXssScanner, OpenRedirectScanner,
+    )
+    cls_map = {
+        "sqli": SqliScanner, "xss": XssScanner, "ssrf": SsrfScanner,
+        "idor": IdorScanner, "nosqli": NosqliScanner, "ssti": SstiScanner,
+        "cmdi": CmdiScanner, "lfi": LfiScanner, "csrf": CsrfScanner,
+        "storedxss": StoredXssScanner, "redirect": OpenRedirectScanner,
+    }
+    return cls_map[scanner_key]
 
-    if not report:
-        console.print(
-            "[yellow]No recon data — skipping vulnerability scanners.[/yellow]\n"
-        )
-        return
 
+async def _async_run_scanners(report: dict, scanner_keys: list[str],
+                              console: Console) -> None:
+    """Run specified scanners against recon report targets."""
     scan_targets = _build_scan_targets(report)
     if not scan_targets:
         console.print(
@@ -213,45 +218,42 @@ async def _async_fullscan(target: str, is_wildcard: bool, allports: bool,
         return
 
     try:
-        from agent.scanners import (
-            SqliScanner, XssScanner, SsrfScanner, IdorScanner,
-            NosqliScanner, SstiScanner, CmdiScanner, LfiScanner,
-            CsrfScanner, StoredXssScanner, OpenRedirectScanner,
-        )
         from agent.recipes.loader import load_recipes
         from agent.http import HttpClient, Session
     except ImportError as exc:
         console.print(f"  [yellow]Scanners not available: {exc}[/yellow]\n")
         return
 
-    seed_url = report["seed"]
-
-    # Show endpoint classification table
     print_endpoint_classification(scan_targets, console)
-
     console.print(
         f"[bold orange1]  VULNERABILITY SCAN: {report['host']}[/bold orange1]"
     )
-
-    scanner_classes = [
-        SqliScanner, XssScanner, SsrfScanner,
-        NosqliScanner, SstiScanner, CmdiScanner, LfiScanner,
-        CsrfScanner, StoredXssScanner, OpenRedirectScanner,
-    ]
 
     load_result = load_recipes()
     recipes = load_result.recipes
     all_candidates = []
     finding_num = 0
 
-    session = Session()
-
     async with HttpClient(verify_ssl=False, stealth=True) as client:
-        for scanner_cls in scanner_classes:
+        for key in scanner_keys:
+            try:
+                scanner_cls = _get_scanner_class(key)
+            except (ImportError, KeyError) as exc:
+                console.print(f"  [red]Scanner {key} not available: {exc}[/red]")
+                continue
+
             name = scanner_cls.__name__.replace("Scanner", "")
             _status(console, f"Scanning for {name}")
+
             try:
-                scanner = scanner_cls(client, session)
+                if key == "idor":
+                    attacker = Session()
+                    victim = Session()
+                    scanner = scanner_cls(client, attacker, victim)
+                else:
+                    session = Session()
+                    scanner = scanner_cls(client, session)
+
                 matching_recipes = [
                     r for r in recipes
                     if any(vc in scanner.vuln_classes for vc in r.applies_to)
@@ -280,48 +282,37 @@ async def _async_fullscan(target: str, is_wildcard: bool, allports: bool,
             except Exception as exc:
                 console.print(f"  [red]{name} error: {exc}[/red]")
 
-        # IDOR scanner needs two sessions (attacker + victim)
-        _status(console, "Scanning for IDOR/BOLA")
-        try:
-            attacker = Session()
-            victim = Session()
-            idor = IdorScanner(client, attacker, victim)
-            matching_recipes = [
-                r for r in recipes
-                if any(vc in idor.vuln_classes for vc in r.applies_to)
-            ]
-            if not matching_recipes:
-                matching_recipes = recipes[:1] if recipes else []
-            for st in scan_targets:
-                for recipe in matching_recipes:
-                    candidates = await idor.detect(
-                        st["url"], recipe,
-                        params=st["params"],
-                        method=st["method"],
-                        id_location=st["id_location"],
-                        siblings=st["siblings"],
-                    )
-                    if candidates:
-                        all_candidates.extend(candidates)
-                        for c in candidates:
-                            finding_num += 1
-                            console.print(
-                                f"  [green]/ AUTON[/green] | "
-                                f"[white]Finding confirmed — IDOR on {c.endpoint}[/white]"
-                            )
-                            print_finding(finding_num, c, console)
-        except Exception as exc:
-            console.print(f"  [red]IDOR error: {exc}[/red]")
-
     print_scan_summary(all_candidates, console)
 
 
-def _run_fullscan(target: str, is_wildcard: bool, allports: bool,
-                  console: Console) -> None:
-    """Execute full scan: recon + all vulnerability scanners (sync wrapper)."""
-    asyncio.run(
-        _async_fullscan(target, is_wildcard, allports, console)
-    )
+_ALL_SCANNER_KEYS = [
+    "sqli", "xss", "ssrf", "nosqli", "ssti", "cmdi",
+    "lfi", "csrf", "storedxss", "redirect", "idor",
+]
+
+
+async def _async_fullscan(target: str, is_wildcard: bool, allports: bool,
+                          use_nmap: bool, console: Console) -> None:
+    """Run recon + all vulnerability scanners."""
+    report = await _async_recon(target, is_wildcard, allports, use_nmap, console)
+    if not report:
+        console.print(
+            "[yellow]No recon data — skipping vulnerability scanners.[/yellow]\n"
+        )
+        return
+    await _async_run_scanners(report, _ALL_SCANNER_KEYS, console)
+
+
+async def _async_single_scan(target: str, is_wildcard: bool, scanner_key: str,
+                             console: Console) -> None:
+    """Run recon + a single scanner."""
+    report = await _async_recon(target, is_wildcard, False, False, console)
+    if not report:
+        console.print(
+            "[yellow]No recon data — cannot run scanner.[/yellow]\n"
+        )
+        return
+    await _async_run_scanners(report, [scanner_key], console)
 
 
 def repl() -> None:
@@ -346,17 +337,11 @@ def repl() -> None:
             continue
 
         if not stripped.startswith("/"):
-            console.print("[bold blue]  * Thinking...[/bold blue]")
-            msg_type, content = route_input(stripped)
-
-            if msg_type == "error":
-                console.print(f"[red][!] {content}[/red]")
-                continue
-            if msg_type == "chat":
-                console.print(f"[bold green]  AUTON >[/bold green] [white]{content}[/white]")
-                continue
-            console.print(f"[dim]  → {content}[/dim]")
-            raw = content
+            console.print(
+                "[red]Unknown input. Commands start with /. "
+                "Type /commands for help.[/red]"
+            )
+            continue
 
         cmd = parse(raw)
 
@@ -372,12 +357,29 @@ def repl() -> None:
             print_commands_table(console=console)
             continue
 
+        if cmd.action == "nmap":
+            _add_target_to_scope(cmd.target, console)
+            targets = _resolve_targets(cmd.target, cmd.is_wildcard, console)
+            if targets:
+                _run_nmap_on_targets(targets, cmd.allports, console)
+            continue
+
         if cmd.action == "recon":
-            _run_recon(cmd.target, cmd.is_wildcard, cmd.allports, console)
+            _run_recon(cmd.target, cmd.is_wildcard, cmd.allports, cmd.nmap, console)
             continue
 
         if cmd.action == "fullscan":
-            _run_fullscan(cmd.target, cmd.is_wildcard, cmd.allports, console)
+            asyncio.run(
+                _async_fullscan(cmd.target, cmd.is_wildcard, cmd.allports,
+                                cmd.nmap, console)
+            )
+            continue
+
+        if cmd.action == "scan_single":
+            asyncio.run(
+                _async_single_scan(cmd.target, cmd.is_wildcard, cmd.scanner,
+                                   console)
+            )
             continue
 
 
