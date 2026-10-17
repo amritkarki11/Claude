@@ -10,13 +10,7 @@ class TestMain:
     @patch("sys.argv", ["auton"])
     def test_main_default(self, mock_repl):
         main()
-        mock_repl.assert_called_once_with(no_dog=False)
-
-    @patch("auton.cli.repl")
-    @patch("sys.argv", ["auton", "--no-dog"])
-    def test_main_no_dog(self, mock_repl):
-        main()
-        mock_repl.assert_called_once_with(no_dog=True)
+        mock_repl.assert_called_once()
 
 
 class TestRepl:
@@ -24,7 +18,7 @@ class TestRepl:
     @patch("auton.cli.print_banner")
     def test_exit_command(self, mock_banner, mock_prompt):
         mock_prompt.ask.return_value = "/exit"
-        repl(no_dog=True)
+        repl()
         mock_banner.assert_called_once()
 
     @patch("auton.cli.print_commands_table")
@@ -32,26 +26,26 @@ class TestRepl:
     @patch("auton.cli.print_banner")
     def test_commands_then_exit(self, mock_banner, mock_prompt, mock_cmds_table):
         mock_prompt.ask.side_effect = ["/commands", "/exit"]
-        repl(no_dog=True)
+        repl()
         mock_cmds_table.assert_called_once()
 
     @patch("auton.cli.Prompt")
     @patch("auton.cli.print_banner")
     def test_unknown_command_shows_error(self, mock_banner, mock_prompt):
         mock_prompt.ask.side_effect = ["/bogus", "/exit"]
-        repl(no_dog=True)
+        repl()
 
     @patch("auton.cli.Prompt")
     @patch("auton.cli.print_banner")
     def test_keyboard_interrupt_exits(self, mock_banner, mock_prompt):
         mock_prompt.ask.side_effect = KeyboardInterrupt()
-        repl(no_dog=True)
+        repl()
 
     @patch("auton.cli.Prompt")
     @patch("auton.cli.print_banner")
     def test_eof_exits(self, mock_banner, mock_prompt):
         mock_prompt.ask.side_effect = EOFError()
-        repl(no_dog=True)
+        repl()
 
     @patch("auton.cli._run_recon")
     @patch("auton.cli.Prompt")
@@ -59,7 +53,7 @@ class TestRepl:
     def test_recon_dispatches(self, mock_banner, mock_prompt, mock_recon):
         mock_prompt.ask.side_effect = ["/recon example.com", "/exit"]
         mock_recon.return_value = None
-        repl(no_dog=True)
+        repl()
         mock_recon.assert_called_once()
         args = mock_recon.call_args[0]
         assert args[0] == "example.com"
@@ -70,7 +64,7 @@ class TestRepl:
     def test_fullscan_dispatches(self, mock_banner, mock_prompt, mock_fullscan):
         mock_prompt.ask.side_effect = ["/fullscan example.com", "/exit"]
         mock_fullscan.return_value = None
-        repl(no_dog=True)
+        repl()
         mock_fullscan.assert_called_once()
         args = mock_fullscan.call_args[0]
         assert args[0] == "example.com"
@@ -81,7 +75,7 @@ class TestRepl:
     def test_wildcard_passes_through(self, mock_banner, mock_prompt, mock_recon):
         mock_prompt.ask.side_effect = ["/recon *.example.com", "/exit"]
         mock_recon.return_value = None
-        repl(no_dog=True)
+        repl()
         args = mock_recon.call_args[0]
         assert args[0] == "*.example.com"
         assert args[1] is True  # is_wildcard
