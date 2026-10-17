@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.prompt import Prompt
 
 from auton.ui.banner import print_banner
-from auton.ui.terminal import RunningDog
+from auton.ui.terminal import TerminalBot, RunningDog
 from auton.router.parser import (
     parse,
     print_commands_table,

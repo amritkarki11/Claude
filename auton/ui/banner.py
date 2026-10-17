@@ -1,8 +1,7 @@
-"""Startup banner — multi-color ASCII art with attribution."""
+"""Startup banner — grey AUTON logo with attribution."""
 from __future__ import annotations
 
 from rich.console import Console
-from rich.table import Table
 from rich.text import Text
 
 _ASCII_ART = r"""
@@ -20,36 +19,29 @@ _TAGLINE = "Autonomous Pentesting Agent"
 _CREDIT = "Created by Amrit Karki"
 _VERSION_LINE = "v0.1.0  |  14 scanners  |  deterministic verification"
 
-_ROW_COLORS = ["green", "blue", "dark_orange", "red", "yellow"]
+_ROW_COLORS = ["grey70"]
 
 
 def print_banner(console: Console | None = None) -> None:
-    """Print the startup banner with multi-color gradient."""
+    """Print the startup banner with grey logo and attribution."""
     con = console or Console()
+    width = con.width or 80
 
-    tbl = Table(
-        show_header=False,
-        show_edge=False,
-        show_lines=False,
-        padding=(0, 0),
-        expand=True,
-        box=None,
-    )
-    tbl.add_column("art", ratio=3, no_wrap=True)
-    tbl.add_column("credit", ratio=1, justify="right", vertical="bottom")
+    lines = _ASCII_ART.strip("\n").split("\n")
 
     art_text = Text()
-    lines = _ASCII_ART.strip("\n").split("\n")
     for i, line in enumerate(lines):
-        color = _ROW_COLORS[i % len(_ROW_COLORS)]
-        art_text.append(line, style=f"bold {color}")
+        art_text.append(line, style="bold grey70")
         if i < len(lines) - 1:
             art_text.append("\n")
 
-    credit_text = Text(f"\n\n\n\n{_CREDIT}\n", style="italic yellow")
+    con.print(art_text)
 
-    tbl.add_row(art_text, credit_text)
-    con.print(tbl)
+    credit_line = Text()
+    padding = max(width - len(_CREDIT) - 2, 0)
+    credit_line.append(" " * padding)
+    credit_line.append(_CREDIT, style="italic yellow")
+    con.print(credit_line)
 
     con.print(
         f"  [bold green]{_TAGLINE}[/bold green]",

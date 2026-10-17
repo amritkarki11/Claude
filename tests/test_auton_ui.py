@@ -1,4 +1,4 @@
-"""Tests for auton/ui/ — banner and terminal animation."""
+"""Tests for auton/ui/ — banner and terminal bot animation."""
 import io
 import pytest
 from unittest.mock import patch, MagicMock
@@ -7,10 +7,10 @@ from rich.console import Console
 
 from auton.ui.banner import print_banner, _ASCII_ART, _TAGLINE, _CREDIT, _ROW_COLORS
 from auton.ui.terminal import (
-    DogSpinner, RunningDog,
-    _DOG_FRAMES, _DOG_FRAME_A, _DOG_FRAME_B,
-    _DOG_RIGHT_SPREAD, _DOG_RIGHT_TOGETHER,
-    _DOG_LEFT_SPREAD, _DOG_LEFT_TOGETHER,
+    TerminalBot, RunningDog, DogSpinner,
+    _FRAME_A, _FRAME_B, _FRAMES,
+    _BOT_BASE, _BOT_HEAD, _BOT_BODY,
+    _LEGS_SPREAD, _LEGS_TOGETHER,
 )
 
 
@@ -40,69 +40,81 @@ class TestBanner:
     def test_ascii_art_not_empty(self):
         assert len(_ASCII_ART.strip()) > 50
 
-    def test_row_colors_defined(self):
-        assert len(_ROW_COLORS) == 5
-        assert "green" in _ROW_COLORS
-        assert "dark_orange" in _ROW_COLORS
+    def test_row_colors_grey(self):
+        assert "grey70" in _ROW_COLORS
+
+    def test_banner_contains_version(self):
+        buf = io.StringIO()
+        con = Console(file=buf, force_terminal=False, width=120, no_color=True)
+        print_banner(console=con)
+        output = buf.getvalue()
+        assert "v0.1.0" in output
 
 
-class TestDogSpinner:
-    def test_four_frames_exist(self):
-        assert len(_DOG_FRAMES) == 4
-        assert _DOG_FRAMES[0] is _DOG_RIGHT_SPREAD
-        assert _DOG_FRAMES[1] is _DOG_RIGHT_TOGETHER
-        assert _DOG_FRAMES[2] is _DOG_LEFT_SPREAD
-        assert _DOG_FRAMES[3] is _DOG_LEFT_TOGETHER
+class TestTerminalBot:
+    def test_two_frames_exist(self):
+        assert len(_FRAMES) == 2
+        assert _FRAMES[0] is _FRAME_A
+        assert _FRAMES[1] is _FRAME_B
 
-    def test_frame_a_b_compat(self):
-        assert _DOG_FRAME_A is _DOG_RIGHT_SPREAD
-        assert _DOG_FRAME_B is _DOG_RIGHT_TOGETHER
+    def test_frame_a_has_spread_legs(self):
+        assert _FRAME_A[-1] is _LEGS_SPREAD
 
-    def test_left_right_frames_same_height(self):
-        assert len(_DOG_RIGHT_SPREAD) == len(_DOG_LEFT_SPREAD)
-        assert len(_DOG_RIGHT_TOGETHER) == len(_DOG_LEFT_TOGETHER)
+    def test_frame_b_has_together_legs(self):
+        assert _FRAME_B[-1] is _LEGS_TOGETHER
 
-    def test_disabled_dog_does_not_start(self):
-        dog = DogSpinner(disabled=True)
-        dog.start("test")
-        assert not dog._running
-        assert dog._thread is None
+    def test_frames_same_line_count(self):
+        assert len(_FRAME_A) == len(_FRAME_B) == 4
+
+    def test_bot_base_structure(self):
+        assert len(_BOT_BASE) == 3
+        assert "o_o" in _BOT_HEAD
+        assert "###" in _BOT_BODY
+
+    def test_disabled_bot_does_not_start(self):
+        bot = TerminalBot(disabled=True)
+        bot.start("test")
+        assert not bot._running
+        assert bot._thread is None
 
     def test_running_dog_alias(self):
-        assert RunningDog is DogSpinner
+        assert RunningDog is TerminalBot
+
+    def test_dog_spinner_alias(self):
+        assert DogSpinner is TerminalBot
 
     def test_start_stop(self):
         con = Console(file=io.StringIO(), force_terminal=True, width=80)
-        dog = DogSpinner(console=con, disabled=False)
-        dog.start("Testing")
-        assert dog._running is True
-        assert dog._thread is not None
-        dog.stop()
-        assert dog._running is False
+        bot = TerminalBot(console=con, disabled=False)
+        bot.start("Testing")
+        assert bot._running is True
+        assert bot._thread is not None
+        bot.stop()
+        assert bot._running is False
 
     def test_double_start_ignored(self):
         con = Console(file=io.StringIO(), force_terminal=True, width=80)
-        dog = DogSpinner(console=con, disabled=False)
-        dog.start("First")
-        t1 = dog._thread
-        dog.start("Second")
-        assert dog._thread is t1
-        dog.stop()
+        bot = TerminalBot(console=con, disabled=False)
+        bot.start("First")
+        t1 = bot._thread
+        bot.start("Second")
+        assert bot._thread is t1
+        bot.stop()
 
     def test_stop_when_not_running(self):
-        dog = DogSpinner(disabled=True)
-        dog.stop()
+        bot = TerminalBot(disabled=True)
+        bot.stop()
 
     def test_update_status(self):
-        dog = DogSpinner(disabled=True)
-        dog.update_status("new status")
-        assert dog._status == "new status"
+        bot = TerminalBot(disabled=True)
+        bot.update_status("new status")
+        assert bot._status == "new status"
 
     def test_update_status_thread_safe(self):
         con = Console(file=io.StringIO(), force_terminal=True, width=80)
-        dog = DogSpinner(console=con, disabled=False)
-        dog.start("Initial")
-        dog.update_status("Updated")
-        with dog._lock:
-            assert dog._status == "Updated"
-        dog.stop()
+        bot = TerminalBot(console=con, disabled=False)
+        bot.start("Initial")
+        bot.update_status("Updated")
+        with bot._lock:
+            assert bot._status == "Updated"
+        bot.stop()
