@@ -1,13 +1,13 @@
-"""Local LLM translator — converts natural language to slash commands.
+"""Local LLM translator — converts natural language to commands or chat.
 
 Uses Ollama (llama3.2:1b) running locally. No data leaves the machine.
-Strict whitelist: only known commands are accepted from LLM output.
+Strict whitelist: only known commands are executed from LLM output.
+Non-command responses are returned as chat messages.
 """
 from __future__ import annotations
 
 import httpx
 import logging
-import re
 
 logger = logging.getLogger(__name__)
 
@@ -15,35 +15,26 @@ _OLLAMA_URL = "http://localhost:11434/api/generate"
 _MODEL = "llama3.2:1b"
 
 _SYSTEM_PROMPT = (
-    "You are a command translator for a pentesting agent. "
-    "The user will give you a natural language request. "
-    "You must translate it into EXACTLY ONE of the following commands. "
-    "Do not explain, do not add markdown, just output the raw command.\n"
-    "Available commands:\n"
-    "- /recon <target> [optional flags: /allports] — target must be a real domain or IP\n"
-    "- /fullscan <target> [optional flags: /allports] — target must be a real domain or IP\n"
-    "- /analyze <filepath>\n"
-    "- /commands — show help\n"
-    "- /exit — quit\n"
-    "IMPORTANT: If the user sends a greeting (hi, hey, hello, etc), "
-    "a question, or anything that is NOT a clear request to scan/recon "
-    "a specific target, output ONLY: /commands\n"
-    "The target MUST be a valid domain name or IP address. "
-    "Never use usernames, random words, or system paths as targets.\n"
-    "User request: "
+    "You are AUTON, an autonomous pentesting agent running in a terminal. "
+    "You help users with security testing.\n\n"
+    "If the user asks to scan, recon, or test a target, output ONLY the "
+    "matching command with no explanation:\n"
+    "- /recon <target> [/allports] — reconnaissance scan\n"
+    "- /fullscan <target> [/allports] — full vulnerability scan\n"
+    "- /analyze <filepath> — analyze a report\n"
+    "- /commands — show available commands\n"
+    "- /exit — quit\n\n"
+    "The target MUST be a valid domain (example.com) or IP (192.168.1.1). "
+    "Never use usernames, random words, or system paths as targets.\n\n"
+    "For anything else (greetings, questions, conversation), respond "
+    "naturally in 1-2 short sentences as AUTON. Be concise and helpful.\n\n"
+    "User: "
 )
 
 _VALID_COMMANDS = {"recon", "fullscan", "analyze", "commands", "exit"}
 _COMMANDS_NEEDING_TARGET = {"recon", "fullscan"}
 
 _TIMEOUT = 30.0
-
-_GREETINGS = {
-    "hi", "hey", "hello", "sup", "yo", "hola", "hii", "hiii",
-    "what's up", "whats up", "howdy", "greetings", "good morning",
-    "good evening", "good afternoon", "gm", "thanks", "thank you",
-    "ok", "okay", "cool", "nice", "yes", "no", "help", "?",
-}
 
 
 def _looks_like_valid_target(target: str) -> bool:
@@ -55,8 +46,8 @@ def _looks_like_valid_target(target: str) -> bool:
     return "." in target or ":" in target
 
 
-def _validate_command(raw: str) -> str | None:
-    """Return the cleaned command if it's on the whitelist, else None."""
+def _extract_command(raw: str) -> str | None:
+    """Extract a valid command from LLM output, or None if it's chat."""
     raw = raw.strip()
     for line in raw.splitlines():
         line = line.strip()
@@ -74,15 +65,14 @@ def _validate_command(raw: str) -> str | None:
     return None
 
 
-def translate_to_command(user_input: str) -> str:
-    """Translate natural language to a slash command via local Ollama.
+def translate(user_input: str) -> tuple[str, str]:
+    """Translate natural language via local Ollama.
 
-    Returns the translated command string on success,
-    or an empty string on failure (caller should show error).
+    Returns (type, content) where:
+      type="command" → content is a slash command to execute
+      type="chat"    → content is a conversational response to display
+      type="error"   → content is an error message
     """
-    if user_input.strip().lower().rstrip("!.,?") in _GREETINGS:
-        return "/commands"
-
     prompt = _SYSTEM_PROMPT + user_input
 
     payload = {
@@ -96,29 +86,24 @@ def translate_to_command(user_input: str) -> str:
     }
 
     try:
-        resp = httpx.post(
-            _OLLAMA_URL,
-            json=payload,
-            timeout=_TIMEOUT,
-        )
+        resp = httpx.post(_OLLAMA_URL, json=payload, timeout=_TIMEOUT)
         resp.raise_for_status()
     except httpx.ConnectError:
-        logger.warning("Ollama not reachable at %s", _OLLAMA_URL)
-        return ""
+        return ("error", "Ollama not running. Start it with: ollama serve")
     except httpx.HTTPStatusError as exc:
-        logger.warning("Ollama returned %s", exc.response.status_code)
-        return ""
+        return ("error", f"Ollama error: HTTP {exc.response.status_code}")
     except httpx.TimeoutException:
-        logger.warning("Ollama request timed out after %.0fs", _TIMEOUT)
-        return ""
+        return ("error", "Ollama timed out. Is the model loaded?")
 
     data = resp.json()
     raw_response = data.get("response", "").strip()
     logger.debug("Ollama raw response: %r", raw_response)
 
-    validated = _validate_command(raw_response)
-    if validated is None:
-        logger.warning("LLM output failed validation: %r", raw_response)
-        return ""
+    if not raw_response:
+        return ("error", "LLM returned empty response.")
 
-    return validated
+    command = _extract_command(raw_response)
+    if command:
+        return ("command", command)
+
+    return ("chat", raw_response)

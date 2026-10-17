@@ -117,20 +117,22 @@ def parse(raw: str) -> ParsedCommand:
     )
 
 
-def route_input(user_input: str) -> str:
+def route_input(user_input: str) -> tuple[str, str]:
     """Hybrid router: slash commands pass through, natural language goes to LLM.
 
-    Returns a slash command string (either the original or LLM-translated).
-    Returns empty string if the LLM can't translate.
+    Returns (type, content):
+      ("command", "/recon example.com")  — execute this command
+      ("chat", "Hello! I'm AUTON...")    — display this response
+      ("error", "Ollama not running")    — display this error
     """
     stripped = user_input.strip()
     if not stripped:
-        return stripped
+        return ("command", stripped)
     if stripped.startswith("/"):
-        return stripped
+        return ("command", stripped)
 
-    from auton.core.translator import translate_to_command
-    return translate_to_command(stripped)
+    from auton.core.translator import translate
+    return translate(stripped)
 
 
 def print_commands_table(console: Console | None = None) -> None:

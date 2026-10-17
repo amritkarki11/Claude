@@ -347,15 +347,16 @@ def repl() -> None:
 
         if not stripped.startswith("/"):
             console.print("[bold blue]  * Thinking...[/bold blue]")
-            translated = route_input(stripped)
-            if not translated:
-                console.print(
-                    "[red][!] LLM could not understand the request. "
-                    "Please use /commands.[/red]"
-                )
+            msg_type, content = route_input(stripped)
+
+            if msg_type == "error":
+                console.print(f"[red][!] {content}[/red]")
                 continue
-            console.print(f"[dim]  → {translated}[/dim]")
-            raw = translated
+            if msg_type == "chat":
+                console.print(f"[bold green]  AUTON >[/bold green] [white]{content}[/white]")
+                continue
+            console.print(f"[dim]  → {content}[/dim]")
+            raw = content
 
         cmd = parse(raw)
 
