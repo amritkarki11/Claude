@@ -10,10 +10,11 @@ requires-python = ">=3.11"
 dependencies = [
     "rich>=13.0",
     "httpx>=0.27",
+    "pyyaml>=6.0",
 ]
 
 [project.scripts]
 auton = "auton.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["auton*"]
+include = ["auton*", "agent*"]
