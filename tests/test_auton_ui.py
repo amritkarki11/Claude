@@ -38,7 +38,7 @@ class TestBanner:
         assert "Pentesting Agent" in output
 
     def test_robot_lines_not_empty(self):
-        assert len(_ROBOT_LINES) == 16
+        assert len(_ROBOT_LINES) == 10
 
     def test_auton_text_not_empty(self):
         assert len(_AUTON_TEXT) == 5

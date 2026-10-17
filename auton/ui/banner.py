@@ -5,30 +5,24 @@ from rich.console import Console
 from rich.text import Text
 
 _ROBOT_LINES = [
-    r"        ___________        ",
-    r"       |    ___    |       ",
-    r"       |   |   |   |      ",
-    r"       |   |___|   |      ",
-    r"    ___|___________|___    ",
-    r"   |  ___|_________|___   ",
-    r"   | |  ___     ___  | |  ",
-    r"   | | |0  |   |  0| | |  ",
-    r"   | | |___|   |___| | |  ",
-    r"   | |   _________   | |  ",
-    r"   | |  |  =====  |  | |  ",
-    r"   | |  |_________|  | |  ",
-    r"   |_|_______________|_|  ",
-    r"     |  |||     |||  |    ",
-    r"     |  |||     |||  |    ",
-    r"     |__|_|     |_|__|    ",
+    "         ▄█████▄         ",
+    "        ██ ▀ ▀ ██        ",
+    "        ██  ▄  ██        ",
+    "      ▄████████████▄     ",
+    "     ██ ██       ██ ██   ",
+    "     ██ ██       ██ ██   ",
+    "     ██   ███████   ██   ",
+    "     ▀██████████████▀    ",
+    "       ██ ██ ██ ██       ",
+    "       ▀▀ ▀▀ ▀▀ ▀▀      ",
 ]
 
 _AUTON_TEXT = [
-    r"    _   _   _ _____ ___  _  _  ",
-    r"   / \ | | | |_   _/ _ \| \| | ",
-    r"  / _ \| | | | | || | | |  ` | ",
-    r" / ___ | |_| | | || |_| | |\ | ",
-    r"/_/   \_\___/  |_| \___/|_| \_|",
+    " █████  ██    ██ ████████  ██████  ███    ██",
+    "██   ██ ██    ██    ██    ██    ██ ████   ██",
+    "███████ ██    ██    ██    ██    ██ ██ ██  ██",
+    "██   ██ ██    ██    ██    ██    ██ ██  ██ ██",
+    "██   ██  ██████     ██     ██████  ██   ████",
 ]
 
 _TAGLINE = "Autonomous Pentesting Agent"
@@ -45,15 +39,17 @@ def print_banner(console: Console | None = None) -> None:
 
     con.print()
 
-    # Print robot
+    # Print robot centered
     for line in _ROBOT_LINES:
         txt = Text()
+        pad = max((width - len(line)) // 2, 0)
+        txt.append(" " * pad)
         txt.append(line, style="bold green")
         con.print(txt)
 
     con.print()
 
-    # Print AUTON figlet text
+    # Print AUTON block text centered
     for line in _AUTON_TEXT:
         txt = Text()
         pad = max((width - len(line)) // 2, 0)
