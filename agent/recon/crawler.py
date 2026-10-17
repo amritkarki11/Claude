@@ -69,6 +69,11 @@ _LINK_HREF = re.compile(
     re.IGNORECASE,
 )
 
+_SCRIPT_SRC = re.compile(
+    r"""<script\s[^>]*src\s*=\s*["']([^"']+)["']""",
+    re.IGNORECASE,
+)
+
 # Interesting resource patterns (API endpoints in data attributes, etc.)
 _DATA_URL = re.compile(
     r"""data-(?:url|href|src|action|endpoint|api)\s*=\s*["']([^"']+)["']""",
@@ -269,6 +274,7 @@ class CrawledPage:
     title: str = ""
     links: list[str] = field(default_factory=list)      # outgoing links
     forms: list[DiscoveredForm] = field(default_factory=list)
+    script_urls: list[str] = field(default_factory=list) # <script src> URLs
     data_urls: list[str] = field(default_factory=list)   # data-url/data-api attrs
     depth: int = 0
     error: str = ""
@@ -309,6 +315,18 @@ class CrawlResult:
         out: list[str] = []
         for page in self.pages:
             for u in page.data_urls:
+                if u not in seen:
+                    seen.add(u)
+                    out.append(u)
+        return out
+
+    @property
+    def all_script_urls(self) -> list[str]:
+        """All unique <script src> URLs discovered across all pages."""
+        seen: set[str] = set()
+        out: list[str] = []
+        for page in self.pages:
+            for u in page.script_urls:
                 if u not in seen:
                     seen.add(u)
                     out.append(u)
@@ -492,6 +510,13 @@ class Crawler:
             if form:
                 page.forms.append(form)
 
+        # Script src URLs
+        for m in _SCRIPT_SRC.finditer(html):
+            src = m.group(1).strip()
+            resolved = self._resolve_url(src, page_url)
+            if resolved:
+                page.script_urls.append(resolved)
+
         # Data attributes with URLs
         for m in _DATA_URL.finditer(html):
             data_val = m.group(1).strip()
@@ -565,6 +590,7 @@ class Crawler:
 
         page.links = parsed.links
         page.forms = parsed.forms
+        page.script_urls = parsed.script_urls
         page.data_urls = parsed.data_urls
         return page
 
@@ -694,3 +720,52 @@ class Crawler:
         """Extract <title> content from HTML."""
         m = re.search(r"<title[^>]*>([^<]+)</title>", html, re.IGNORECASE)
         return m.group(1).strip() if m else ""
+
+
+async def crawl(
+    client: HttpClient,
+    seed_url: str,
+    *,
+    max_depth: int = 2,
+    max_pages: int = 100,
+    session: Session | None = None,
+    bodies: dict[str, str] | None = None,
+) -> dict:
+    """Bridge function: wraps the Crawler class and returns the dict format
+    expected by agent.recon.pipeline.run_recon().
+
+    Returns:
+        {"pages_crawled": [...urls], "forms": [...], "script_urls": [...]}
+    """
+    crawler = Crawler(
+        client, session,
+        base_url=seed_url,
+        max_depth=max_depth,
+        max_pages=max_pages,
+    )
+    result = await crawler.crawl()
+
+    pages_crawled = [p.url for p in result.valid_pages]
+    forms = []
+    for f in result.all_forms:
+        forms.append({
+            "action": f.action,
+            "method": f.method,
+            "fields": [{"name": fld.name, "type": fld.input_type} for fld in f.fields],
+            "source_page": f.source_page,
+        })
+
+    if bodies is not None:
+        for page in result.pages:
+            if page.url not in bodies and not page.error:
+                try:
+                    resp = await client.get(page.url, session=session)
+                    bodies[page.url] = resp.text
+                except Exception:
+                    pass
+
+    return {
+        "pages_crawled": pages_crawled,
+        "forms": forms,
+        "script_urls": result.all_script_urls,
+    }
