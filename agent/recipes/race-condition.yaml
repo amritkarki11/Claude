@@ -1,0 +1,20 @@
+id: race-condition
+applies_to:
+  - api
+  - web
+tech_signals:
+  - rest-api
+  - session-cookie
+preconditions:
+  - state-changing endpoints are discovered (transfer, purchase, vote, etc.)
+detect:
+  - step: "Identify state-changing endpoints from crawled URLs"
+  - step: "Send a baseline single request to confirm the endpoint responds"
+  - step: "Fire N identical requests concurrently using asyncio.gather"
+  - step: "Check if more than one request returns success (2xx)"
+  - step: "Compare response bodies for identical processing indicators"
+signal: "Multiple concurrent requests all succeed, indicating the server processes duplicates without proper locking (TOCTOU)"
+verify: "Repeat the concurrent test and confirm multiple successes persist across runs; a single success on retry indicates the original was a fluke"
+severity: medium
+remediation: "Implement idempotency keys, database-level locking (SELECT FOR UPDATE), or optimistic concurrency control. Use unique constraint checks for operations that must happen exactly once."
+source: "CWE-362 (Concurrent Execution Using Shared Resource with Improper Synchronization), OWASP Race Condition"
