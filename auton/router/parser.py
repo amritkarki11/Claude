@@ -163,7 +163,7 @@ def print_commands_table(console: Console | None = None) -> None:
     # Flags sub-table
     flags_tbl = Table(
         title="[bold bright_cyan]Flags[/bold bright_cyan]",
-        border_style="bright_blue",
+        border_style="yellow",
         header_style="bold bright_magenta",
         show_lines=True,
         expand=False,
@@ -180,7 +180,7 @@ def print_commands_table(console: Console | None = None) -> None:
 
     # Scanners
     con.print()
-    con.print("[bold bright_cyan]Scanners (14):[/bold bright_cyan]")
+    con.print("[bold dark_orange]Scanners (14):[/bold dark_orange]")
     scanners_text = "  " + "  |  ".join(
         f"[bright_magenta]{s}[/bright_magenta]" for s in _SCANNER_NAMES
     )

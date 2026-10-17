@@ -47,6 +47,7 @@ async def _async_recon(target: str, is_wildcard: bool, allports: bool,
     targets: list[str] = []
     if is_wildcard:
         dog.start("Enumerating subdomains")
+        dog.update_status(f"DNS brute-force on {target}")
         targets = enumerate_subdomains(target, console=console)
         dog.stop()
         if not targets:
@@ -61,6 +62,7 @@ async def _async_recon(target: str, is_wildcard: bool, allports: bool,
         from agent.scope import add_to_scope
         add_to_scope(t)
         dog.start(f"Port scanning {t}")
+        dog.update_status(f"Nmap scanning {t}")
         nmap_out = run_nmap(t, allports=allports, console=console)
         dog.stop()
         if nmap_out:
@@ -73,6 +75,7 @@ async def _async_recon(target: str, is_wildcard: bool, allports: bool,
         seed_url = f"https://{seed_url}"
 
     dog.start(f"Crawling & analyzing {seed_url}")
+    dog.update_status(f"Crawling {seed_url}")
     report = None
     try:
         from agent.http import HttpClient
@@ -199,7 +202,7 @@ def repl(no_dog: bool = False) -> None:
 
     while True:
         try:
-            raw = Prompt.ask("[bold cyan]Auton >[/bold cyan] ")
+            raw = Prompt.ask("[bold green]Auton >[/bold green] ")
         except (KeyboardInterrupt, EOFError):
             console.print("\n[dim]Exiting.[/dim]")
             break

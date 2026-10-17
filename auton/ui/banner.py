@@ -1,4 +1,4 @@
-"""Startup banner — colorful ASCII art with attribution."""
+"""Startup banner — multi-color ASCII art with attribution."""
 from __future__ import annotations
 
 from rich.console import Console
@@ -20,12 +20,13 @@ _TAGLINE = "Autonomous Pentesting Agent"
 _CREDIT = "Created by Amrit Karki"
 _VERSION_LINE = "v0.1.0  |  14 scanners  |  deterministic verification"
 
+_ROW_COLORS = ["green", "blue", "dark_orange", "red", "yellow"]
+
 
 def print_banner(console: Console | None = None) -> None:
-    """Print the startup banner with attribution."""
+    """Print the startup banner with multi-color gradient."""
     con = console or Console()
 
-    # Build a two-column layout: logo left, credit right
     tbl = Table(
         show_header=False,
         show_edge=False,
@@ -37,15 +38,21 @@ def print_banner(console: Console | None = None) -> None:
     tbl.add_column("art", ratio=3, no_wrap=True)
     tbl.add_column("credit", ratio=1, justify="right", vertical="bottom")
 
-    art_text = Text(_ASCII_ART, style="bold bright_cyan")
-    credit_text = Text(f"\n\n\n\n{_CREDIT}\n", style="italic dim magenta")
+    art_text = Text()
+    lines = _ASCII_ART.strip("\n").split("\n")
+    for i, line in enumerate(lines):
+        color = _ROW_COLORS[i % len(_ROW_COLORS)]
+        art_text.append(line, style=f"bold {color}")
+        if i < len(lines) - 1:
+            art_text.append("\n")
+
+    credit_text = Text(f"\n\n\n\n{_CREDIT}\n", style="italic yellow")
 
     tbl.add_row(art_text, credit_text)
     con.print(tbl)
 
-    # Tagline centered
     con.print(
-        f"  [bold bright_magenta]{_TAGLINE}[/bold bright_magenta]",
+        f"  [bold green]{_TAGLINE}[/bold green]",
         justify="center",
     )
     con.print(
