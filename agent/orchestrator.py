@@ -42,7 +42,10 @@ from .scanners.open_redirect import OpenRedirectScanner
 from .scanners.bruteforce import BruteforceScanner
 from .scanners.headers import HeaderScanner
 from .scanners.bola import BolaScanner
+from .scanners.graphql import GraphQLScanner
 from .recon.testcase_mapper import TestCaseMapper
+from .recon.api_schema import ApiSchemaDiscovery
+from .recon.graphql_introspect import GraphQLIntrospection
 from .verify.base import Verifier, Verdict, VerifyResult
 from .verify.idor import IdorVerifier
 from .verify.sqli import SqliVerifier
@@ -358,6 +361,8 @@ class Orchestrator:
         self.registry.register("account-lockout", BruteforceScanner)
         self.registry.register("security-headers", HeaderScanner)
         self.registry.register("misconfiguration", HeaderScanner)
+        self.registry.register("graphql", GraphQLScanner)
+        self.registry.register("graphql-introspection", GraphQLScanner)
 
     async def run(self, target: str) -> TargetState:
         """Execute the full orchestration loop on a target.

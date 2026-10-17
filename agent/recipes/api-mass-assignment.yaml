@@ -1,0 +1,19 @@
+id: api-mass-assignment
+applies_to:
+  - api
+tech_signals:
+  - rest-api
+  - openapi
+preconditions:
+  - an API spec or endpoint accepting JSON body is discovered
+  - the spec defines writable object properties
+detect:
+  - step: "Identify API endpoints that accept JSON body (POST/PUT/PATCH)"
+  - step: "From the spec, find object properties not normally sent by the client (role, isAdmin, verified, etc.)"
+  - step: "Send a request including the extra property with an elevated value"
+  - step: "Check if the response reflects the injected property or the server state changed"
+signal: "The API accepts and processes properties the client should not be able to set (e.g. role=admin, isAdmin=true)"
+verify: "Replay the request with the injected property and confirm the server persists or reflects the value; then fetch the object to verify the property was actually set"
+severity: high
+remediation: "Use explicit allowlists for writable properties in each endpoint. Never bind request body directly to internal objects. Validate and sanitize all input properties against the expected schema."
+source: "CWE-915 (Improperly Controlled Modification of Dynamically-Determined Object Attributes), OWASP API3:2023 Broken Object Property Level Authorization"

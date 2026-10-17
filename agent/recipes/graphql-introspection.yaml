@@ -1,0 +1,19 @@
+id: graphql-introspection
+applies_to:
+  - api
+  - web
+tech_signals:
+  - graphql
+preconditions:
+  - a GraphQL endpoint is discovered
+detect:
+  - step: "Send an introspection query to the GraphQL endpoint"
+    method: POST
+    query: "{ __schema { types { name } } }"
+  - step: "Check if the response contains schema type information"
+  - step: "Count exposed types, queries, and mutations"
+signal: "The introspection query returns the full schema including types, queries, and mutations"
+verify: "Replay the introspection query and confirm the response contains __schema data with type definitions"
+severity: low
+remediation: "Disable GraphQL introspection in production. Use allowlisting for permitted queries if possible."
+source: "CWE-200 (Exposure of Sensitive Information), OWASP API8:2023 Security Misconfiguration"
