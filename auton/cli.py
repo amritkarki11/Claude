@@ -95,7 +95,7 @@ async def _async_recon(target: str, is_wildcard: bool, allports: bool,
     report = None
     try:
         from agent.http import HttpClient
-        from agent.recon.pipeline import run_recon, write_report, format_summary
+        from agent.recon.pipeline import run_recon, write_report
         async with HttpClient(verify_ssl=False, stealth=True) as client:
             report = await run_recon(client, seed_url)
         if report:

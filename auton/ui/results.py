@@ -4,10 +4,13 @@ Theme: red, white, grey, green only.
 """
 from __future__ import annotations
 
+from urllib.parse import urlencode
+
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 from rich.panel import Panel
+from rich.syntax import Syntax
 
 
 def print_recon_summary(report: dict, report_path: str, console: Console) -> None:
@@ -37,6 +40,42 @@ def print_recon_summary(report: dict, report_path: str, console: Console) -> Non
     tbl.add_row("Report:", str(report_path))
 
     console.print(tbl)
+
+    # Technology fingerprint
+    fp = report.get("fingerprint", {})
+    signals = fp.get("signals", [])
+    waf = fp.get("waf", [])
+    sec_headers = fp.get("security_headers", [])
+
+    if signals or waf:
+        console.print()
+        console.print("[bold red]  TECHNOLOGY FINGERPRINT[/bold red]")
+
+        fp_tbl = Table(
+            show_header=False,
+            border_style="grey50",
+            show_lines=False,
+            expand=False,
+            padding=(0, 2),
+        )
+        fp_tbl.add_column("Key", style="bold red", min_width=18)
+        fp_tbl.add_column("Value", style="white")
+
+        if signals:
+            fp_tbl.add_row("Technologies:", ", ".join(signals))
+        if waf:
+            fp_tbl.add_row("WAF:", ", ".join(waf))
+        if sec_headers:
+            fp_tbl.add_row("Security Hdrs:", ", ".join(sec_headers))
+        missing_sec = []
+        for h in ["csp", "hsts", "x-frame-options", "x-content-type-options"]:
+            if h not in sec_headers:
+                missing_sec.append(h)
+        if missing_sec:
+            fp_tbl.add_row("Missing Hdrs:", ", ".join(missing_sec))
+
+        console.print(fp_tbl)
+
     console.print()
 
 
@@ -75,7 +114,7 @@ def print_endpoint_classification(scan_targets: list[dict], console: Console) ->
 
 
 def print_finding(finding_num: int, candidate, console: Console) -> None:
-    """Print a single finding card."""
+    """Print a single finding card with full request/response and curl."""
     conf = candidate.confidence.upper()
     if conf == "HIGH":
         conf_style = "bold red"
@@ -115,36 +154,63 @@ def print_finding(finding_num: int, candidate, console: Console) -> None:
         tbl.add_row("Payload:", str(evidence["payload"]))
     if evidence.get("detail"):
         tbl.add_row("Detail:", str(evidence["detail"]))
+    if evidence.get("technique"):
+        tbl.add_row("Technique:", evidence["technique"])
 
     console.print(tbl)
 
-    # Reproduce command
+    # Reproduce command — build full curl from request_data
     req = candidate.request_data or {}
-    if req:
-        curl = _build_curl(candidate.endpoint, candidate.method, req)
-        if curl:
-            console.print()
-            console.print("  [bold red]REPRODUCE[/bold red]")
-            console.print(f"  [green]{curl}[/green]")
+    curl = _build_curl(candidate.endpoint, candidate.method, req)
+    if curl:
+        console.print()
+        console.print("  [bold red]REPRODUCE[/bold red]")
+        console.print(Syntax(curl, "bash", theme="monokai", line_numbers=False, word_wrap=True))
 
-    # Request/Response
-    if req.get("headers") or req.get("body"):
+    # Full HTTP request
+    full_req = req.get("full_request", "")
+    if full_req:
         console.print()
         console.print("  [bold grey70]REQUEST[/bold grey70]")
-        if req.get("body"):
-            console.print(f"  [white]{req['body'][:200]}[/white]")
+        console.print(Syntax(full_req, "http", theme="monokai", line_numbers=False, word_wrap=True))
+    elif req.get("headers") or req.get("body"):
+        console.print()
+        console.print("  [bold grey70]REQUEST[/bold grey70]")
+        _print_request_fallback(req, console)
 
+    # Full HTTP response
     resp = candidate.response_data or {}
-    if resp.get("status_code") or resp.get("body"):
+    full_resp = resp.get("full_response", "")
+    if full_resp:
         console.print()
         console.print("  [bold grey70]RESPONSE[/bold grey70]")
-        if resp.get("status_code"):
-            console.print(f"  [white]HTTP {resp['status_code']}[/white]")
-        if resp.get("body"):
-            body_preview = str(resp["body"])[:200]
-            console.print(f"  [white]{body_preview}[/white]")
+        console.print(Syntax(full_resp, "http", theme="monokai", line_numbers=False, word_wrap=True))
+    elif resp.get("status_code") or resp.get("status") or resp.get("body") or resp.get("body_snippet"):
+        console.print()
+        console.print("  [bold grey70]RESPONSE[/bold grey70]")
+        _print_response_fallback(resp, console)
 
     console.print()
+
+
+def _print_request_fallback(req: dict, console: Console) -> None:
+    """Print request data from dict fields when full_request is absent."""
+    if req.get("headers"):
+        for k, v in req["headers"].items():
+            console.print(f"  [white]{k}: {v}[/white]")
+    if req.get("body"):
+        console.print(f"  [white]{str(req['body'])[:500]}[/white]")
+
+
+def _print_response_fallback(resp: dict, console: Console) -> None:
+    """Print response data from dict fields when full_response is absent."""
+    status = resp.get("status_code") or resp.get("status")
+    if status:
+        console.print(f"  [white]HTTP {status}[/white]")
+    if resp.get("body"):
+        console.print(f"  [white]{str(resp['body'])[:500]}[/white]")
+    if resp.get("body_snippet"):
+        console.print(f"  [white]{str(resp['body_snippet'])[:500]}[/white]")
 
 
 def print_scan_summary(all_candidates: list, console: Console) -> None:
@@ -188,20 +254,56 @@ def print_scan_summary(all_candidates: list, console: Console) -> None:
 
 
 def _build_curl(url: str, method: str, req: dict) -> str:
-    """Build a curl reproduce command from request data."""
-    parts = ["curl", "-k"]
+    """Build a complete curl reproduce command from request data.
+
+    Uses scanner request_data fields: param, payload, id_location,
+    sibling_fields, headers, body, cookies, form_data.
+    """
+    parts = ["curl", "-k", "-v"]
 
     if method != "GET":
         parts.extend(["-X", method])
 
+    # Headers from request_data
     headers = req.get("headers", {})
     for k, v in headers.items():
         parts.extend(["-H", f"'{k}: {v}'"])
 
-    body = req.get("body")
-    if body:
+    # Build the payload body/query from scanner-specific fields
+    param = req.get("param") or req.get("parameter", "")
+    payload = req.get("payload") or req.get("payload_true", "")
+    id_location = req.get("id_location", "query")
+    siblings = req.get("sibling_fields") or req.get("siblings") or {}
+
+    # form_data from CSRF scanner
+    form_data = req.get("form_data")
+
+    if form_data:
+        # CSRF-style: we have the full form_data dict
+        if "Content-Type" not in {k.lower(): k for k in headers}:
+            parts.extend(["-H", "'Content-Type: application/x-www-form-urlencoded'"])
+        body_str = urlencode(form_data)
+        parts.extend(["-d", f"'{body_str}'"])
+    elif param and payload:
+        # Scanner gave us param + payload + siblings
+        form_fields = dict(siblings)
+        form_fields[param] = payload
+
+        if id_location == "body" or method == "POST":
+            if "Content-Type" not in {h for h in headers}:
+                parts.extend(["-H", "'Content-Type: application/x-www-form-urlencoded'"])
+            body_str = urlencode(form_fields)
+            parts.extend(["-d", f"'{body_str}'"])
+        else:
+            qs = urlencode(form_fields)
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}{qs}"
+    elif req.get("body"):
+        # Raw body string
+        body = str(req["body"])
         parts.extend(["-d", f"'{body}'"])
 
+    # Cookies
     cookies = req.get("cookies", {})
     if cookies:
         cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())

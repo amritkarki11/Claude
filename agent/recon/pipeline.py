@@ -18,6 +18,7 @@ from ..http import HttpClient, Session
 from ..scope import ScopeError, host_of, in_scope
 from .crawler import crawl
 from .dns_recon import dns_records
+from .fingerprint import Fingerprinter
 from .port_scan import scan_ports
 from .js_extractor import extract_endpoints
 from .secret_scanner import scan_files
@@ -82,6 +83,14 @@ async def run_recon(
 
     js_urls = [u for u in crawled["script_urls"] if in_scope(u)]
     skipped_js = [u for u in crawled["script_urls"] if not in_scope(u)]
+
+    # Technology fingerprinting: detect server, frameworks, WAF, CMS
+    fingerprinter = Fingerprinter(client, session or Session())
+    try:
+        fp_result = await fingerprinter.fingerprint(seed_url)
+        fingerprint = fp_result.summary()
+    except Exception:
+        fingerprint = {"signals": [], "signal_count": 0, "waf": [], "security_headers": []}
 
     # Archive/OSINT recon (opt-in): wayback.py handles its own scope exception
     # for the archive hosts themselves. Any in-scope JS it turns up that the
@@ -151,6 +160,7 @@ async def run_recon(
         "endpoints": endpoints,
         "sourcemaps": sourcemaps,
         "secrets": secrets,
+        "fingerprint": fingerprint,
         "dns": dns,
         "ports": ports,
         "archive": archive,
@@ -163,6 +173,7 @@ async def run_recon(
             "params": sum(len(e["params"]) for e in endpoints),
             "sourcemaps": len(sourcemaps),
             "sources_exposed": sum(m["source_count"] for m in sourcemaps),
+            "tech_signals": fingerprint.get("signal_count", 0),
             "archive_urls": sum(
                 v["summary"]["js_urls"] + v["summary"]["endpoints"] + v["summary"]["other"]
                 for v in archive.values()
