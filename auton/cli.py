@@ -31,8 +31,8 @@ from auton.router.parser import (
 
 
 def _status(console: Console, text: str) -> None:
-    """Print a bold blue status line."""
-    console.print(f"  [bold blue]* {text}[/bold blue]")
+    """Print a bold status line."""
+    console.print(f"  [bold green]* {text}[/bold green]")
 
 
 def _add_target_to_scope(target: str, console: Console) -> None:
@@ -70,7 +70,7 @@ def _run_nmap_on_targets(targets: list[str], allports: bool, console: Console) -
         _status(console, f"Port scanning {t}")
         nmap_out = run_nmap(t, allports=allports, console=console)
         if nmap_out:
-            console.print(f"\n[bold bright_cyan]— Nmap results for {t} —[/bold bright_cyan]")
+            console.print(f"\n[bold white]— Nmap results for {t} —[/bold white]")
             console.print(nmap_out)
 
 
@@ -226,7 +226,7 @@ async def _async_run_scanners(report: dict, scanner_keys: list[str],
 
     print_endpoint_classification(scan_targets, console)
     console.print(
-        f"[bold orange1]  VULNERABILITY SCAN: {report['host']}[/bold orange1]"
+        f"[bold red]  VULNERABILITY SCAN: {report['host']}[/bold red]"
     )
 
     load_result = load_recipes()
@@ -327,7 +327,7 @@ def repl() -> None:
 
     while True:
         try:
-            raw = Prompt.ask("[bold green]Auton >[/bold green] ")
+            raw = Prompt.ask("[bold red]AUTON >[/bold red] ")
         except (KeyboardInterrupt, EOFError):
             console.print("\n[dim]Exiting.[/dim]")
             break

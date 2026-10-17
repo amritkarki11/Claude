@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 
 from rich.console import Console
 
-from auton.ui.banner import print_banner, _ROBOT_LINES, _AUTON_TEXT, _TAGLINE, _CREDIT, _ROW_COLORS
+from auton.ui.banner import print_banner, _BANNER_LINES, _TAGLINE, _CREDIT, _ROW_COLORS
 from auton.ui.terminal import (
     TerminalBot, RunningDog, DogSpinner,
     _FRAME_A, _FRAME_B, _FRAMES,
@@ -37,11 +37,8 @@ class TestBanner:
         output = buf.getvalue()
         assert "Pentesting Agent" in output
 
-    def test_robot_lines_not_empty(self):
-        assert len(_ROBOT_LINES) == 10
-
-    def test_auton_text_not_empty(self):
-        assert len(_AUTON_TEXT) == 5
+    def test_banner_lines_not_empty(self):
+        assert len(_BANNER_LINES) == 8
 
     def test_row_colors_grey(self):
         assert "grey70" in _ROW_COLORS

@@ -143,14 +143,14 @@ def print_commands_table(console: Console | None = None) -> None:
 
     # Main commands
     tbl = Table(
-        title="[bold bright_cyan]AUTON Commands[/bold bright_cyan]",
+        title="[bold red]AUTON Commands[/bold red]",
         title_style="bold",
-        border_style="bright_blue",
-        header_style="bold bright_magenta",
+        border_style="grey50",
+        header_style="bold white",
         show_lines=True,
         expand=False,
     )
-    tbl.add_column("Command", style="bold bright_cyan", min_width=34)
+    tbl.add_column("Command", style="bold green", min_width=34)
     tbl.add_column("Description", style="white")
 
     tbl.add_row("/recon <target>", "Crawl + JS analysis + secrets (no nmap)")
@@ -168,9 +168,9 @@ def print_commands_table(console: Console | None = None) -> None:
 
     # Individual scanners
     scan_tbl = Table(
-        title="[bold bright_cyan]Individual Scanners[/bold bright_cyan]",
-        border_style="bright_blue",
-        header_style="bold bright_magenta",
+        title="[bold red]Individual Scanners[/bold red]",
+        border_style="grey50",
+        header_style="bold white",
         show_lines=True,
         expand=False,
     )
@@ -194,9 +194,9 @@ def print_commands_table(console: Console | None = None) -> None:
 
     # Flags
     flags_tbl = Table(
-        title="[bold bright_cyan]Flags[/bold bright_cyan]",
-        border_style="yellow",
-        header_style="bold bright_magenta",
+        title="[bold red]Flags[/bold red]",
+        border_style="grey50",
+        header_style="bold white",
         show_lines=True,
         expand=False,
     )
