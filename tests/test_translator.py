@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from auton.core.translator import translate_to_command, _validate_command
+from auton.core.translator import translate_to_command, _validate_command, _looks_like_valid_target
 from auton.router.parser import route_input
 
 
@@ -43,6 +43,36 @@ class TestValidateCommand:
 
     def test_markdown_garbage(self):
         assert _validate_command("```\nsome code\n```") is None
+
+    def test_recon_with_invalid_target_rejected(self):
+        assert _validate_command("/recon root") is None
+
+    def test_recon_with_bare_word_rejected(self):
+        assert _validate_command("/recon user") is None
+
+    def test_fullscan_needs_valid_target(self):
+        assert _validate_command("/fullscan localhost") is None
+
+    def test_commands_no_target_needed(self):
+        assert _validate_command("/commands") == "/commands"
+
+
+class TestLooksLikeValidTarget:
+    def test_domain(self):
+        assert _looks_like_valid_target("example.com") is True
+
+    def test_ip(self):
+        assert _looks_like_valid_target("192.168.1.1") is True
+
+    def test_bare_word(self):
+        assert _looks_like_valid_target("root") is False
+
+    def test_reserved_words(self):
+        for word in ("root", "user", "admin", "test", "localhost", "self"):
+            assert _looks_like_valid_target(word) is False
+
+    def test_empty(self):
+        assert _looks_like_valid_target("") is False
 
 
 class TestRouteInput:

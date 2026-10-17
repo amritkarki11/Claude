@@ -1,20 +1,34 @@
-"""Startup banner — AUTON logo with robot and attribution."""
+"""Startup banner — AUTON logo with detailed robot and attribution."""
 from __future__ import annotations
 
 from rich.console import Console
 from rich.text import Text
 
-# Robot (8 lines) + AUTON text (8 lines) side by side
-# Robot is on the left, AUTON block-art on the right
-_BANNER_LINES = [
-    ("    |       ", "   ▄████████ ███    █▄      ███      ▄██████▄  ███▄▄▄▄       "),
-    ("  .-----.   ", "  ███    ███ ███    ███ ▀█████████▄ ███    ███ ███▀▀▀██▄     "),
-    ("  | O O |   ", "  ███    ███ ███    ███    ▀███▀▀██ ███    ███ ███   ███     "),
-    ("  | --- |   ", "  ███    ███ ███    ███     ███   ▀ ███    ███ ███   ███     "),
-    ("  +-----+   ", "▀███████████ ███    ███     ███     ███    ███ ███   ███     "),
-    ("  | ### |   ", "  ███    ███ ███    ███     ███     ███    ███ ███   ███     "),
-    ("  | | | |   ", "  ███    ███ ███    ███     ███     ███    ███ ███   ███     "),
-    ("  '-' '-'   ", "  ███    █▀  ████████▀     ▄████▀   ▀██████▀   ▀█   █▀     "),
+_ROBOT_LINES = [
+    r"        ___________        ",
+    r"       |    ___    |       ",
+    r"       |   |   |   |      ",
+    r"       |   |___|   |      ",
+    r"    ___|___________|___    ",
+    r"   |  ___|_________|___   ",
+    r"   | |  ___     ___  | |  ",
+    r"   | | |0  |   |  0| | |  ",
+    r"   | | |___|   |___| | |  ",
+    r"   | |   _________   | |  ",
+    r"   | |  |  =====  |  | |  ",
+    r"   | |  |_________|  | |  ",
+    r"   |_|_______________|_|  ",
+    r"     |  |||     |||  |    ",
+    r"     |  |||     |||  |    ",
+    r"     |__|_|     |_|__|    ",
+]
+
+_AUTON_TEXT = [
+    r"    _   _   _ _____ ___  _  _  ",
+    r"   / \ | | | |_   _/ _ \| \| | ",
+    r"  / _ \| | | | | || | | |  ` | ",
+    r" / ___ | |_| | | || |_| | |\ | ",
+    r"/_/   \_\___/  |_| \___/|_| \_|",
 ]
 
 _TAGLINE = "Autonomous Pentesting Agent"
@@ -25,18 +39,27 @@ _ROW_COLORS = ["grey70"]
 
 
 def print_banner(console: Console | None = None) -> None:
-    """Print the startup banner with robot + AUTON logo."""
+    """Print the startup banner with detailed robot + AUTON text."""
     con = console or Console()
     width = con.width or 80
 
     con.print()
 
-    # Print robot + AUTON side by side
-    for robot_part, auton_part in _BANNER_LINES:
-        line = Text()
-        line.append(robot_part, style="bold green")
-        line.append(auton_part, style="bold grey70")
-        con.print(line)
+    # Print robot
+    for line in _ROBOT_LINES:
+        txt = Text()
+        txt.append(line, style="bold green")
+        con.print(txt)
+
+    con.print()
+
+    # Print AUTON figlet text
+    for line in _AUTON_TEXT:
+        txt = Text()
+        pad = max((width - len(line)) // 2, 0)
+        txt.append(" " * pad)
+        txt.append(line, style="bold bright_cyan")
+        con.print(txt)
 
     con.print()
 

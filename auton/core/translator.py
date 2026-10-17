@@ -18,19 +18,34 @@ _SYSTEM_PROMPT = (
     "You are a command translator for a pentesting agent. "
     "The user will give you a natural language request. "
     "You must translate it into EXACTLY ONE of the following commands. "
-    "Do not explain, do not add markdown, just output the command.\n"
+    "Do not explain, do not add markdown, just output the raw command.\n"
     "Available commands:\n"
-    "- /recon <target> [optional flags: /allports]\n"
-    "- /fullscan <target> [optional flags: /allports]\n"
+    "- /recon <target> [optional flags: /allports] — target must be a real domain or IP\n"
+    "- /fullscan <target> [optional flags: /allports] — target must be a real domain or IP\n"
     "- /analyze <filepath>\n"
-    "- /commands\n"
-    "- /exit\n"
+    "- /commands — show help\n"
+    "- /exit — quit\n"
+    "IMPORTANT: If the user sends a greeting (hi, hey, hello, etc), "
+    "a question, or anything that is NOT a clear request to scan/recon "
+    "a specific target, output ONLY: /commands\n"
+    "The target MUST be a valid domain name or IP address. "
+    "Never use usernames, random words, or system paths as targets.\n"
     "User request: "
 )
 
 _VALID_COMMANDS = {"recon", "fullscan", "analyze", "commands", "exit"}
+_COMMANDS_NEEDING_TARGET = {"recon", "fullscan"}
 
 _TIMEOUT = 30.0
+
+
+def _looks_like_valid_target(target: str) -> bool:
+    """Check if a target looks like a real domain or IP, not a hallucination."""
+    if not target:
+        return False
+    if target in ("root", "user", "admin", "test", "localhost", "self"):
+        return False
+    return "." in target or ":" in target
 
 
 def _validate_command(raw: str) -> str | None:
@@ -39,9 +54,16 @@ def _validate_command(raw: str) -> str | None:
     for line in raw.splitlines():
         line = line.strip()
         if line.startswith("/"):
-            cmd_name = line.split()[0].lstrip("/").lower()
-            if cmd_name in _VALID_COMMANDS:
-                return line
+            parts = line.split()
+            cmd_name = parts[0].lstrip("/").lower()
+            if cmd_name not in _VALID_COMMANDS:
+                continue
+            if cmd_name in _COMMANDS_NEEDING_TARGET:
+                non_flag_args = [p for p in parts[1:] if not p.startswith("/") and not p.startswith("--")]
+                target = non_flag_args[0] if non_flag_args else ""
+                if not _looks_like_valid_target(target):
+                    return None
+            return line
     return None
 
 
