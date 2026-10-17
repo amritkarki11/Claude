@@ -1,0 +1,18 @@
+id: oauth-redirect-open
+applies_to:
+  - web
+  - api
+tech_signals:
+  - oauth
+  - sso
+preconditions:
+  - an OAuth authorization endpoint with redirect_uri parameter is discovered
+detect:
+  - step: "Identify the redirect_uri parameter in the OAuth endpoint"
+  - step: "Replace redirect_uri with an attacker-controlled domain"
+  - step: "Check if the server redirects to the attacker domain"
+signal: "The server redirects to an attacker-controlled URI, allowing authorization code or token theft"
+verify: "Replay with the manipulated redirect_uri and confirm the Location header points to the attacker domain"
+severity: high
+remediation: "Strictly validate redirect_uri against a whitelist of pre-registered callback URLs. Use exact string matching, not prefix/substring matching."
+source: "CWE-601 (URL Redirection to Untrusted Site), RFC 6749 Section 10.6"

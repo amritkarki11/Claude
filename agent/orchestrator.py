@@ -43,6 +43,8 @@ from .scanners.bruteforce import BruteforceScanner
 from .scanners.headers import HeaderScanner
 from .scanners.bola import BolaScanner
 from .scanners.graphql import GraphQLScanner
+from .scanners.oauth import OAuthScanner
+from .scanners.jwt import JwtScanner
 from .recon.testcase_mapper import TestCaseMapper
 from .recon.api_schema import ApiSchemaDiscovery
 from .recon.graphql_introspect import GraphQLIntrospection
@@ -363,6 +365,11 @@ class Orchestrator:
         self.registry.register("misconfiguration", HeaderScanner)
         self.registry.register("graphql", GraphQLScanner)
         self.registry.register("graphql-introspection", GraphQLScanner)
+        self.registry.register("oauth", OAuthScanner)
+        self.registry.register("oauth-state", OAuthScanner)
+        self.registry.register("oauth-redirect", OAuthScanner)
+        self.registry.register("jwt", JwtScanner)
+        self.registry.register("jwt-alg-none", JwtScanner)
 
     async def run(self, target: str) -> TargetState:
         """Execute the full orchestration loop on a target.

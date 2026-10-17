@@ -1,0 +1,19 @@
+id: jwt-alg-none
+applies_to:
+  - api
+  - web
+tech_signals:
+  - jwt
+  - bearer-token
+preconditions:
+  - a JWT token is available (from session or response)
+detect:
+  - step: "Decode the JWT header to find the current algorithm"
+  - step: "Forge a new JWT with alg set to none and empty signature"
+  - step: "Send the forged token to an authenticated endpoint"
+  - step: "Check if the server accepts it (returns 200 with valid data)"
+signal: "The server accepts a JWT with alg:none, bypassing signature verification entirely"
+verify: "Replay the forged alg:none token against the same endpoint twice; confirm both return authenticated responses"
+severity: critical
+remediation: "Explicitly reject alg:none in JWT verification. Use an allowlist of accepted algorithms. Pin the expected algorithm server-side."
+source: "CWE-327 (Use of a Broken or Risky Cryptographic Algorithm), CVE-2015-9235"

@@ -1,0 +1,18 @@
+id: oauth-state-missing
+applies_to:
+  - web
+  - api
+tech_signals:
+  - oauth
+  - sso
+preconditions:
+  - an OAuth authorization endpoint is discovered
+detect:
+  - step: "Identify the OAuth /authorize endpoint"
+  - step: "Send a request without the state parameter"
+  - step: "Check if the server processes the request (redirects or shows auth page)"
+signal: "The OAuth flow proceeds without requiring a state parameter, enabling CSRF attacks on the authorization flow"
+verify: "Replay the request without state and confirm the server redirects to the callback without error"
+severity: medium
+remediation: "Require and validate the state parameter on every OAuth authorization request. Bind it to the user's session."
+source: "CWE-352 (Cross-Site Request Forgery), RFC 6749 Section 10.12"
