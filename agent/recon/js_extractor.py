@@ -559,3 +559,21 @@ class JsExtractor:
                     existing.params = sorted(set(existing.params) | set(ep.params))
 
         return list(best.values())
+
+
+def extract_endpoints(js_source: str) -> list[dict]:
+    """Bridge function for pipeline.py — extract endpoints from raw JS text.
+
+    Returns a list of dicts with keys: path, method, params, confidence.
+    """
+    extractor = JsExtractor()
+    endpoints = extractor.extract_from_source(js_source)
+    return [
+        {
+            "path": ep.path,
+            "method": ep.method,
+            "params": ep.params,
+            "confidence": ep.confidence,
+        }
+        for ep in endpoints
+    ]
