@@ -1,6 +1,6 @@
 """Tests for auton/cli.py — REPL entry point."""
 import pytest
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock, AsyncMock
 
 from auton.cli import main, repl
 
@@ -53,24 +53,35 @@ class TestRepl:
         mock_prompt.ask.side_effect = EOFError()
         repl(no_dog=True)
 
-    @patch("auton.cli.run_nmap")
+    @patch("auton.cli._run_recon")
     @patch("auton.cli.Prompt")
     @patch("auton.cli.print_banner")
-    def test_recon_calls_nmap(self, mock_banner, mock_prompt, mock_nmap):
+    def test_recon_dispatches(self, mock_banner, mock_prompt, mock_recon):
         mock_prompt.ask.side_effect = ["/recon example.com", "/exit"]
-        mock_nmap.return_value = "PORT  STATE\n80/tcp open"
+        mock_recon.return_value = None
         repl(no_dog=True)
-        mock_nmap.assert_called_once()
-        args, kwargs = mock_nmap.call_args
+        mock_recon.assert_called_once()
+        args = mock_recon.call_args[0]
         assert args[0] == "example.com"
 
-    @patch("auton.cli.enumerate_subdomains")
+    @patch("auton.cli._run_fullscan")
     @patch("auton.cli.Prompt")
     @patch("auton.cli.print_banner")
-    def test_wildcard_triggers_subdomain_enum(self, mock_banner, mock_prompt, mock_enum):
-        mock_prompt.ask.side_effect = ["/recon *.example.com", "/exit"]
-        mock_enum.return_value = []
+    def test_fullscan_dispatches(self, mock_banner, mock_prompt, mock_fullscan):
+        mock_prompt.ask.side_effect = ["/fullscan example.com", "/exit"]
+        mock_fullscan.return_value = None
         repl(no_dog=True)
-        mock_enum.assert_called_once()
-        args, kwargs = mock_enum.call_args
+        mock_fullscan.assert_called_once()
+        args = mock_fullscan.call_args[0]
+        assert args[0] == "example.com"
+
+    @patch("auton.cli._run_recon")
+    @patch("auton.cli.Prompt")
+    @patch("auton.cli.print_banner")
+    def test_wildcard_passes_through(self, mock_banner, mock_prompt, mock_recon):
+        mock_prompt.ask.side_effect = ["/recon *.example.com", "/exit"]
+        mock_recon.return_value = None
+        repl(no_dog=True)
+        args = mock_recon.call_args[0]
         assert args[0] == "*.example.com"
+        assert args[1] is True  # is_wildcard
