@@ -1,9 +1,9 @@
 """Tech-Stack Fingerprinting (Phase 2.4).
 
 Detects server software, frameworks, WAFs, CMS, and JS frameworks
-from HTTP response headers, HTML meta tags, cookies, and response
-body patterns. Output is a set of tech-signal strings that feed
-into recipe matching.
+using Wappalyzer (primary) plus custom header/cookie/HTML rules
+(fallback and supplementary). Output is a set of tech-signal strings
+that feed into recipe matching.
 
 Usage:
     fp = Fingerprinter(client, session)
@@ -14,10 +14,21 @@ from __future__ import annotations
 
 import logging
 import re
+import warnings
 from dataclasses import dataclass, field
 from typing import Any
 
 from ..http import HttpClient, Session
+
+try:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from Wappalyzer import Wappalyzer as _Wappalyzer, WebPage as _WebPage
+    _WAPPALYZER = _Wappalyzer.latest()
+    _HAS_WAPPALYZER = True
+except Exception:
+    _HAS_WAPPALYZER = False
+    _WAPPALYZER = None
 
 logger = logging.getLogger(__name__)
 
@@ -196,11 +207,14 @@ class FingerprintResult:
     cookies_found: list[str] = field(default_factory=list)
     status_code: int = 0
     errors: list[str] = field(default_factory=list)
+    wappalyzer_techs: dict[str, dict] = field(default_factory=dict)
 
     @property
     def signal_set(self) -> set[str]:
         """Unique signal names as a set (for recipe matching)."""
-        return {s.signal for s in self.signals}
+        s = {sig.signal for sig in self.signals}
+        s.update(t.lower().replace(" ", "-") for t in self.wappalyzer_techs)
+        return s
 
     @property
     def signal_list(self) -> list[str]:
@@ -210,7 +224,12 @@ class FingerprintResult:
     @property
     def waf_detected(self) -> list[str]:
         """WAF signals detected."""
-        return [s.signal for s in self.signals if s.signal.startswith("waf-")]
+        wafs = [s.signal for s in self.signals if s.signal.startswith("waf-")]
+        for tech, info in self.wappalyzer_techs.items():
+            cats = info.get("categories", [])
+            if any("WAF" in c or "Security" in c for c in cats):
+                wafs.append(tech)
+        return sorted(set(wafs))
 
     @property
     def security_headers(self) -> list[str]:
@@ -222,6 +241,12 @@ class FingerprintResult:
         return name in self.signal_set
 
     def summary(self) -> dict:
+        # Build categorized tech list from Wappalyzer
+        techs_by_cat: dict[str, list[str]] = {}
+        for tech, info in self.wappalyzer_techs.items():
+            for cat in info.get("categories", ["Other"]):
+                techs_by_cat.setdefault(cat, []).append(tech)
+
         return {
             "target": self.target,
             "status_code": self.status_code,
@@ -229,6 +254,8 @@ class FingerprintResult:
             "signal_count": len(self.signal_set),
             "waf": self.waf_detected,
             "security_headers": self.security_headers,
+            "technologies": dict(self.wappalyzer_techs),
+            "technologies_by_category": techs_by_cat,
             "errors": len(self.errors),
         }
 
@@ -337,6 +364,12 @@ class Fingerprinter:
         if is_main:
             result.status_code = resp.status_code
             result.raw_headers = dict(resp.headers)
+            # Run Wappalyzer on main page
+            if _HAS_WAPPALYZER:
+                try:
+                    self._run_wappalyzer(resp, result)
+                except Exception as exc:
+                    logger.debug("Wappalyzer failed: %s", exc)
 
         # Extract headers as lowercase dict
         headers = {k.lower(): v for k, v in resp.headers.items()}
@@ -350,7 +383,7 @@ class Fingerprinter:
                 if name not in result.cookies_found:
                     result.cookies_found.append(name)
 
-        # Analyze
+        # Analyze with custom rules (supplements Wappalyzer)
         signals = self._analyze_headers(headers)
         signals.extend(self._analyze_waf_headers(headers))
         signals.extend(self._analyze_cookies(cookie_names))
@@ -361,6 +394,20 @@ class Fingerprinter:
             signals.extend(self._analyze_body(resp.text))
 
         result.signals.extend(signals)
+
+    @staticmethod
+    def _run_wappalyzer(resp, result: FingerprintResult) -> None:
+        """Run Wappalyzer analysis on an httpx response."""
+        headers_dict = dict(resp.headers)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            webpage = _WebPage(
+                url=str(resp.url),
+                html=resp.text,
+                headers=headers_dict,
+            )
+            techs = _WAPPALYZER.analyze_with_categories(webpage)
+        result.wappalyzer_techs = techs
 
     # ── Analysis methods ──────────────────────────────────────
 

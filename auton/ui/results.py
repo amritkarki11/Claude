@@ -41,40 +41,62 @@ def print_recon_summary(report: dict, report_path: str, console: Console) -> Non
 
     console.print(tbl)
 
-    # Technology fingerprint
+    # Technology fingerprint (Wappalyzer + custom rules)
     fp = report.get("fingerprint", {})
+    techs_by_cat = fp.get("technologies_by_category", {})
+    technologies = fp.get("technologies", {})
     signals = fp.get("signals", [])
     waf = fp.get("waf", [])
     sec_headers = fp.get("security_headers", [])
 
-    if signals or waf:
+    if technologies or signals or waf:
         console.print()
         console.print("[bold red]  TECHNOLOGY FINGERPRINT[/bold red]")
 
-        fp_tbl = Table(
+        if technologies:
+            fp_tbl = Table(
+                border_style="grey50",
+                header_style="bold white",
+                show_lines=True,
+                expand=False,
+            )
+            fp_tbl.add_column("Category", style="bold red", min_width=22)
+            fp_tbl.add_column("Technology", style="green", min_width=30)
+
+            for cat in sorted(techs_by_cat):
+                fp_tbl.add_row(cat, ", ".join(sorted(techs_by_cat[cat])))
+
+            console.print(fp_tbl)
+
+        # Additional signals from custom rules not in Wappalyzer
+        wap_names = {t.lower().replace(" ", "-") for t in technologies}
+        extra_signals = [s for s in signals if s not in wap_names]
+
+        info_tbl = Table(
             show_header=False,
             border_style="grey50",
             show_lines=False,
             expand=False,
             padding=(0, 2),
         )
-        fp_tbl.add_column("Key", style="bold red", min_width=18)
-        fp_tbl.add_column("Value", style="white")
+        info_tbl.add_column("Key", style="bold red", min_width=18)
+        info_tbl.add_column("Value", style="white")
 
-        if signals:
-            fp_tbl.add_row("Technologies:", ", ".join(signals))
+        if extra_signals:
+            info_tbl.add_row("Extra Signals:", ", ".join(extra_signals))
         if waf:
-            fp_tbl.add_row("WAF:", ", ".join(waf))
+            info_tbl.add_row("WAF:", ", ".join(waf))
         if sec_headers:
-            fp_tbl.add_row("Security Hdrs:", ", ".join(sec_headers))
+            info_tbl.add_row("Security Hdrs:", ", ".join(sec_headers))
         missing_sec = []
         for h in ["csp", "hsts", "x-frame-options", "x-content-type-options"]:
             if h not in sec_headers:
                 missing_sec.append(h)
         if missing_sec:
-            fp_tbl.add_row("Missing Hdrs:", ", ".join(missing_sec))
+            info_tbl.add_row("Missing Hdrs:", ", ".join(missing_sec))
 
-        console.print(fp_tbl)
+        if extra_signals or waf or sec_headers or missing_sec:
+            console.print(info_tbl)
 
     console.print()
 
