@@ -41,6 +41,7 @@ from .scanners.stored_xss import StoredXssScanner
 from .scanners.open_redirect import OpenRedirectScanner
 from .scanners.bruteforce import BruteforceScanner
 from .scanners.headers import HeaderScanner
+from .scanners.bola import BolaScanner
 from .recon.testcase_mapper import TestCaseMapper
 from .verify.base import Verifier, Verdict, VerifyResult
 from .verify.idor import IdorVerifier
@@ -331,7 +332,8 @@ class Orchestrator:
 
         # Register built-in scanners
         self.registry.register("idor", IdorScanner)
-        self.registry.register("bola", IdorScanner)
+        self.registry.register("bola", BolaScanner)
+        self.registry.register("bola-horizontal", BolaScanner)
         self.registry.register("sqli", SqliScanner)
         self.registry.register("sql-injection", SqliScanner)
         self.registry.register("xss", XssScanner)

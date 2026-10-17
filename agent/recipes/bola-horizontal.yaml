@@ -1,0 +1,21 @@
+id: bola-horizontal
+applies_to:
+  - api
+  - web
+tech_signals:
+  - rest-api
+  - session-cookie
+preconditions:
+  - at least one authenticated session is available
+  - endpoints with object ID parameters are discovered
+detect:
+  - step: "Identify endpoints with ID-like parameters (query, path, or body)"
+  - step: "For each ID parameter, generate adjacent IDs (increment/decrement)"
+  - step: "Request the endpoint with the attacker session using the adjacent ID"
+  - step: "Compare original and tampered responses for content differences"
+  - step: "A difference in response content confirms cross-account data access"
+signal: "The endpoint returns a 200 with different object data when an adjacent ID is used, indicating access to another user's resource"
+verify: "Replay the exact ID-swapped request multiple times; confirm the response consistently returns different data than the original ID, and does not indicate an error or authorization failure"
+severity: high
+remediation: "Implement object-level authorization checks: verify the authenticated user owns or is authorized to access the requested object before returning data. Never rely on obscurity of IDs."
+source: "CWE-639 (Authorization Bypass Through User-Controlled Key), OWASP API1:2023 Broken Object Level Authorization"
