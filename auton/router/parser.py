@@ -117,6 +117,22 @@ def parse(raw: str) -> ParsedCommand:
     )
 
 
+def route_input(user_input: str) -> str:
+    """Hybrid router: slash commands pass through, natural language goes to LLM.
+
+    Returns a slash command string (either the original or LLM-translated).
+    Returns empty string if the LLM can't translate.
+    """
+    stripped = user_input.strip()
+    if not stripped:
+        return stripped
+    if stripped.startswith("/"):
+        return stripped
+
+    from auton.core.translator import translate_to_command
+    return translate_to_command(stripped)
+
+
 def print_commands_table(console: Console | None = None) -> None:
     """Print the rich table of all available commands and flags."""
     con = console or Console()

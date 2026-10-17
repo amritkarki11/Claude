@@ -24,6 +24,7 @@ from auton.ui.results import (
 )
 from auton.router.parser import (
     parse,
+    route_input,
     print_commands_table,
     enumerate_subdomains,
     run_nmap,
@@ -339,6 +340,22 @@ def repl() -> None:
         except (KeyboardInterrupt, EOFError):
             console.print("\n[dim]Exiting.[/dim]")
             break
+
+        stripped = raw.strip()
+        if not stripped:
+            continue
+
+        if not stripped.startswith("/"):
+            console.print("[bold blue]  * Thinking...[/bold blue]")
+            translated = route_input(stripped)
+            if not translated:
+                console.print(
+                    "[red][!] LLM could not understand the request. "
+                    "Please use /commands.[/red]"
+                )
+                continue
+            console.print(f"[dim]  → {translated}[/dim]")
+            raw = translated
 
         cmd = parse(raw)
 
