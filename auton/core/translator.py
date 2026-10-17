@@ -38,6 +38,13 @@ _COMMANDS_NEEDING_TARGET = {"recon", "fullscan"}
 
 _TIMEOUT = 30.0
 
+_GREETINGS = {
+    "hi", "hey", "hello", "sup", "yo", "hola", "hii", "hiii",
+    "what's up", "whats up", "howdy", "greetings", "good morning",
+    "good evening", "good afternoon", "gm", "thanks", "thank you",
+    "ok", "okay", "cool", "nice", "yes", "no", "help", "?",
+}
+
 
 def _looks_like_valid_target(target: str) -> bool:
     """Check if a target looks like a real domain or IP, not a hallucination."""
@@ -73,6 +80,9 @@ def translate_to_command(user_input: str) -> str:
     Returns the translated command string on success,
     or an empty string on failure (caller should show error).
     """
+    if user_input.strip().lower().rstrip("!.,?") in _GREETINGS:
+        return "/commands"
+
     prompt = _SYSTEM_PROMPT + user_input
 
     payload = {
