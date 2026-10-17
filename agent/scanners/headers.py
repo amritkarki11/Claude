@@ -430,7 +430,18 @@ class HeaderScanner(Scanner):
 
         # Use a dummy recipe for _detect
         from ..recipes.schema import Recipe
-        dummy = Recipe(id="header-audit", name="Security Headers", steps=[])
+        dummy = Recipe(
+            id="header-audit",
+            applies_to=("web",),
+            tech_signals=("any",),
+            preconditions=("target reachable",),
+            detect=({"step": "check security headers"},),
+            signal="missing or misconfigured security header",
+            verify="header value confirms misconfiguration",
+            severity="medium",
+            remediation="Add recommended security headers",
+            source="OWASP Secure Headers Project",
+        )
         candidates = await self._detect(target, dummy)
 
         for c in candidates:

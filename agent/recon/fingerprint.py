@@ -380,6 +380,7 @@ class Fingerprinter:
                         source="header",
                         evidence=f"{header_name}: {value}",
                     ))
+                    break
         return signals
 
     @staticmethod
