@@ -800,6 +800,7 @@ class Orchestrator:
                 "id_location": "body",
                 "sibling_fields": {pw_field: bypass.payload_password},
                 "full_request": full_request,
+                "technique": "auth-bypass",
             },
             response_data={
                 "status": resp_status,

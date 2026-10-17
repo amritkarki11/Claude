@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 # Header name (lowercase) → list of (regex_on_value, signal)
 _HEADER_RULES: list[tuple[str, list[tuple[re.Pattern, str]]]] = [
     ("server", [
+        (re.compile(r"apache[- ]?coyote", re.I), "apache-coyote"),
+        (re.compile(r"apache[- ]?tomcat", re.I), "tomcat"),
         (re.compile(r"apache", re.I), "apache"),
         (re.compile(r"nginx", re.I), "nginx"),
         (re.compile(r"iis", re.I), "iis"),
@@ -341,7 +343,7 @@ class Fingerprinter:
 
         # Extract cookie names
         cookie_names: list[str] = []
-        for cookie_header in resp.headers.get_list("set-cookie"):
+        for cookie_header in [v for k, v in resp.headers.multi_items() if k.lower() == "set-cookie"]:
             name = cookie_header.split("=", 1)[0].strip()
             if name:
                 cookie_names.append(name)

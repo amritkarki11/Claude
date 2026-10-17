@@ -254,11 +254,20 @@ def display_crawl(crawl_result) -> None:
         print(f"  {_BOLD}Soft-404s:{_RESET}      {_DIM}{soft_404} (filtered){_RESET}")
     print()
 
-    # Forms table
+    # Forms table — deduplicated by (action_path, method)
     if crawl_result.all_forms:
+        seen_forms: dict[tuple[str, str], Any] = {}
+        for form in crawl_result.all_forms:
+            action_path = urlparse(form.action).path or form.action
+            key = (action_path, form.method.upper())
+            if key not in seen_forms:
+                seen_forms[key] = form
+        unique_forms = list(seen_forms.values())
+
         headers = ["ACTION", "METHOD", "FIELDS", "SOURCE"]
         rows = []
-        for form in crawl_result.all_forms[:20]:  # limit display
+        display_limit = 15
+        for form in unique_forms[:display_limit]:
             action_path = urlparse(form.action).path or form.action
             field_names = ", ".join(
                 (f.name if hasattr(f, "name") else str(f))
@@ -274,12 +283,13 @@ def display_crawl(crawl_result) -> None:
                 source_path[:25],
             ])
 
-        print(_sub_header("Discovered Forms"))
+        print(_sub_header(f"Discovered Forms ({len(unique_forms)} unique)"))
         print(_table(headers, rows, col_widths=[35, 8, 30, 25]))
 
-        remaining = len(crawl_result.all_forms) - 20
+        remaining = len(unique_forms) - display_limit
         if remaining > 0:
-            print(f"  {_DIM}... and {remaining} more forms{_RESET}")
+            print(f"  {_DIM}... and {remaining} more — see outputs/crawl_forms.txt{_RESET}")
+            _write_full_forms(crawl_result.all_forms, unique_forms)
     print()
 
 
@@ -386,6 +396,27 @@ def display_recon_summary(inventory) -> None:
     print()
 
 
+def _write_full_forms(all_forms, unique_forms) -> None:
+    """Write all crawled forms to a file for detailed review."""
+    import os
+    out_dir = os.path.join(os.getcwd(), "outputs")
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, "crawl_forms.txt")
+    with open(path, "w") as f:
+        f.write(f"CRAWL FORMS — {len(unique_forms)} unique / {len(all_forms)} total\n")
+        f.write("=" * 70 + "\n\n")
+        for i, form in enumerate(unique_forms, 1):
+            action_path = urlparse(form.action).path or form.action
+            field_names = ", ".join(
+                (fi.name if hasattr(fi, "name") else str(fi))
+                for fi in getattr(form, "fields", [])
+            )
+            source_path = urlparse(form.source_page).path if form.source_page else "?"
+            f.write(f"[{i:03d}] {form.method} {action_path}\n")
+            f.write(f"      Fields: {field_names or 'none'}\n")
+            f.write(f"      Source: {source_path}\n\n")
+
+
 # ── Confirmed finding display ────────────────────────────────
 
 _finding_counter = __import__("itertools").count(1)
@@ -441,56 +472,59 @@ def display_confirmed_finding(result) -> None:
     if detail_text:
         print(f"  {_BOLD}Detail:{_RESET}    {detail_text[:120]}")
 
-    # ── Compact request/response ──
+    # ── Request/Response with headers ──
     full_request = candidate.request_data.get("full_request", "")
     form_data = candidate.request_data.get("form_data", {})
     siblings = candidate.request_data.get("sibling_fields", {})
     resp_data = getattr(candidate, "response_data", {}) or {}
     full_response = resp_data.get("full_response", "")
 
-    # Build compact request line
+    # Build request text
     if full_request:
-        req_lines = [l.strip() for l in full_request.split("\n") if l.strip()]
-        req_summary = req_lines[0] if req_lines else f"{method} {endpoint}"
-        body_lines = [l for l in req_lines[1:] if not l.startswith(("Host:", "Content-"))]
-        if body_lines:
-            req_summary += f" — {body_lines[-1][:100]}"
+        req_text = full_request
     else:
         id_loc = candidate.request_data.get("id_location", "body")
-        req_summary = f"{method} {endpoint}"
+        req_text = f"{method} {endpoint} HTTP/1.1"
         if id_loc == "body" and (form_data or param):
             body = dict(form_data) if form_data else dict(siblings)
             if param and payload:
                 body[param] = payload
-            req_summary += f" — {('&'.join(f'{k}={v}' for k, v in body.items()))[:100]}"
+            body_str = "&".join(f"{k}={v}" for k, v in body.items())
+            req_text += f"\nContent-Type: application/x-www-form-urlencoded\n\n{body_str}"
         elif id_loc == "query" and param and payload:
-            req_summary += f"?{param}={str(payload)[:80]}"
+            req_text = f"{method} {endpoint}?{param}={payload} HTTP/1.1"
 
-    print(f"\n  {_DIM}REQ:{_RESET} {req_summary[:140]}")
-
-    # Build compact response line
+    # Build response text
     if full_response:
-        resp_lines = [l.strip() for l in full_response.split("\n") if l.strip()]
-        status_line = resp_lines[0] if resp_lines else "?"
-        # Extract key headers
-        extras = []
-        for rl in resp_lines[1:6]:
-            rl_lower = rl.lower()
-            if rl_lower.startswith(("location:", "set-cookie:")):
-                extras.append(rl[:80])
-        resp_summary = status_line
-        if extras:
-            resp_summary += " | " + " | ".join(extras)
+        resp_text = full_response
     else:
         status = resp_data.get("status", "?")
-        resp_summary = f"HTTP {status}"
+        resp_text = f"HTTP/1.1 {status}"
         snippet = resp_data.get("body_snippet", "")
         if snippet:
-            first_line = snippet.split("\n")[0].strip()[:100]
-            if first_line:
-                resp_summary += f" — {first_line}"
+            resp_text += f"\n\n{snippet}"
 
-    print(f"  {_DIM}RSP:{_RESET} {resp_summary[:140]}")
+    # Show truncated version in terminal (first 3 lines each)
+    req_lines = req_text.split("\n")
+    resp_lines = resp_text.split("\n")
+    max_preview = 3
+
+    print(f"\n  {_BOLD}{_CYAN}REQUEST{_RESET}")
+    for line in req_lines[:max_preview]:
+        print(f"  {_DIM}│{_RESET} {line.rstrip()[:120]}")
+    if len(req_lines) > max_preview:
+        print(f"  {_DIM}│ ... ({len(req_lines) - max_preview} more lines){_RESET}")
+
+    print(f"  {_BOLD}{_CYAN}RESPONSE{_RESET}")
+    for line in resp_lines[:max_preview]:
+        print(f"  {_DIM}│{_RESET} {line.rstrip()[:120]}")
+    if len(resp_lines) > max_preview:
+        print(f"  {_DIM}│ ... ({len(resp_lines) - max_preview} more lines){_RESET}")
+
+    # Save full details to file
+    detail_file = _save_finding_detail(count, vuln_class, endpoint, req_text, resp_text)
+    if detail_file and (len(req_lines) > max_preview or len(resp_lines) > max_preview):
+        print(f"  {_YELLOW}↳ see more → {detail_file}{_RESET}")
 
     # Curl reproduce — single compact line
     curl_cmd = build_curl_command(candidate)
@@ -498,6 +532,28 @@ def display_confirmed_finding(result) -> None:
         print(f"  {_ORANGE}curl:{_RESET} {_DIM}{curl_cmd[:160]}{_RESET}")
 
     print(f"{_BOLD}{'═' * w}{_RESET}")
+
+
+def _save_finding_detail(count: int, vuln_class: str, endpoint: str,
+                         req_text: str, resp_text: str) -> str | None:
+    """Save full request/response to a file. Returns the relative path."""
+    import os
+    out_dir = os.path.join(os.getcwd(), "outputs")
+    os.makedirs(out_dir, exist_ok=True)
+    filename = f"finding_{count:03d}_{vuln_class.lower()}.txt"
+    path = os.path.join(out_dir, filename)
+    try:
+        with open(path, "w") as f:
+            f.write(f"FINDING #{count:03d} — {vuln_class}\n")
+            f.write(f"Endpoint: {endpoint}\n")
+            f.write("=" * 70 + "\n\n")
+            f.write("── REQUEST ──\n")
+            f.write(req_text + "\n\n")
+            f.write("── RESPONSE ──\n")
+            f.write(resp_text + "\n")
+        return f"outputs/{filename}"
+    except Exception:
+        return None
 
 
 # ── Curl command builder ────────────────────────────────────
