@@ -503,7 +503,7 @@ class Orchestrator:
                             self._on_finding(result)
                 _emit("headers_audit", header_result)
                 logger.info("Header audit: grade=%s, %d issues",
-                            header_result.grade, len([f for f in header_result.findings if f.status == "fail"]))
+                            header_result.score, len([f for f in header_result.findings if f.status == "fail"]))
             else:
                 self._header_audit = None
 
