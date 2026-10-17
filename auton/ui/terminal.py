@@ -1,21 +1,22 @@
 """Running-dog terminal animation using rich, in a background thread."""
 from __future__ import annotations
 
+import sys
 import threading
 import time
 
 from rich.console import Console
-from rich.text import Text
 
-# Two-frame ASCII running dog
-_DOG_FRAMES = [
+_DOG_FRAME_A = [
     r"   __      / )",
     r"  /  \    / / ",
     r" / /\ \--/ /  ",
     r"/_/  \_____/   ",
     r"       ||  ||  ",
     r"      _||_ ||_ ",
-], [
+]
+
+_DOG_FRAME_B = [
     r"   __      / )",
     r"  /  \    / / ",
     r" / /\ \--/ /  ",
@@ -23,6 +24,11 @@ _DOG_FRAMES = [
     r"      _/  \_   ",
     r"     (__)(__)   ",
 ]
+
+_DOG_FRAMES = [_DOG_FRAME_A, _DOG_FRAME_B]
+
+_CLEAR_LINE = "\033[2K"
+_CURSOR_UP = "\033[A"
 
 
 class RunningDog:
@@ -41,12 +47,14 @@ class RunningDog:
         self._running = False
         self._thread: threading.Thread | None = None
         self._message = ""
+        self._frame_lines = 0
 
     def start(self, message: str = "Working") -> None:
         if self._disabled or self._running:
             return
         self._message = message
         self._running = True
+        self._frame_lines = 0
         self._thread = threading.Thread(target=self._animate, daemon=True)
         self._thread.start()
 
@@ -57,28 +65,28 @@ class RunningDog:
         if self._thread is not None:
             self._thread.join(timeout=2.0)
             self._thread = None
-        # Clear the dog frames from terminal
-        frame_height = len(_DOG_FRAMES[0]) + 1  # frames + message line
-        for _ in range(frame_height):
-            self._console.print(" " * 60)
-        # Move cursor back up and overwrite
-        self._console.file.write(f"\033[{frame_height}A")
-        self._console.file.flush()
+        self._erase_frame()
+
+    def _erase_frame(self) -> None:
+        out = self._console.file
+        for _ in range(self._frame_lines):
+            out.write(f"{_CURSOR_UP}{_CLEAR_LINE}\r")
+        out.flush()
+        self._frame_lines = 0
 
     def _animate(self) -> None:
-        frame_idx = 0
-        frame_height = len(_DOG_FRAMES[0]) + 1
+        idx = 0
+        out = self._console.file
         while self._running:
-            frame = _DOG_FRAMES[frame_idx % 2]
-            lines = []
+            self._erase_frame()
+            frame = _DOG_FRAMES[idx % 2]
+            lines_written = 0
             for line in frame:
-                lines.append(f"  [bright_cyan]{line}[/bright_cyan]")
-            lines.append(f"  [dim bright_blue]{self._message}...[/dim bright_blue]")
-            output = "\n".join(lines)
-            self._console.print(output, highlight=False)
+                out.write(f"  \033[96m{line}\033[0m\n")
+                lines_written += 1
+            out.write(f"  \033[2;94m{self._message}...\033[0m\n")
+            lines_written += 1
+            out.flush()
+            self._frame_lines = lines_written
+            idx += 1
             time.sleep(0.4)
-            if self._running:
-                # Move cursor up to overwrite
-                self._console.file.write(f"\033[{frame_height}A")
-                self._console.file.flush()
-            frame_idx += 1

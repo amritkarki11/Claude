@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 from rich.console import Console
 
 from auton.ui.banner import print_banner, _ASCII_ART, _TAGLINE, _CREDIT
-from auton.ui.terminal import RunningDog, _DOG_FRAMES
+from auton.ui.terminal import RunningDog, _DOG_FRAMES, _DOG_FRAME_A, _DOG_FRAME_B
 
 
 class TestBanner:
@@ -45,7 +45,7 @@ class TestBanner:
 class TestRunningDog:
     def test_frames_exist(self):
         assert len(_DOG_FRAMES) == 2
-        assert len(_DOG_FRAMES[0]) == len(_DOG_FRAMES[1])
+        assert len(_DOG_FRAME_A) == len(_DOG_FRAME_B)
 
     def test_disabled_dog_does_not_start(self):
         dog = RunningDog(disabled=True)
