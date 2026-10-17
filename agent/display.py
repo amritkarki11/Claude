@@ -220,14 +220,14 @@ def display_fingerprint(fp_result) -> None:
         return
 
     # Tech signals table
-    headers = ["SIGNAL", "SOURCE"]
+    headers = ["SIGNAL", "VERSION", "SOURCE"]
     rows = []
     for sig in fp_result.signals:
-        # sig is a TechSignal dataclass with .signal and .source attrs
         source = getattr(sig, "source", "detection")
-        rows.append([sig.signal, source])
+        version = getattr(sig, "version", "") or ""
+        rows.append([sig.signal, version or "-", source])
 
-    print(_table(headers, rows, col_widths=[30, 25]))
+    print(_table(headers, rows, col_widths=[25, 15, 20]))
 
     # Security headers
     if fp_result.security_headers:
@@ -441,80 +441,61 @@ def display_confirmed_finding(result) -> None:
     if detail_text:
         print(f"  {_BOLD}Detail:{_RESET}    {detail_text[:120]}")
 
-    # Curl command — most important for reproduction, show prominently
-    curl_cmd = build_curl_command(candidate)
-    if curl_cmd:
-        print(f"\n  {_BOLD}{_ORANGE}┌─ REPRODUCE ─────────────────────────────────────────────{_RESET}")
-        print(f"  {_BOLD}{_ORANGE}│{_RESET} {_BOLD}{curl_cmd}{_RESET}")
-        print(f"  {_BOLD}{_ORANGE}└─────────────────────────────────────────────────────────{_RESET}")
-
-    # ── Request display ──
+    # ── Compact request/response ──
     full_request = candidate.request_data.get("full_request", "")
     form_data = candidate.request_data.get("form_data", {})
     siblings = candidate.request_data.get("sibling_fields", {})
-
-    print(f"\n  {_BOLD}┌─ REQUEST ──────────────────────────────────────────────{_RESET}")
-    if full_request:
-        req_lines = [l for l in full_request.split("\n") if l.strip()]
-        for line in req_lines[:12]:
-            trunc = line.strip()[:120]
-            print(f"  {_DIM}│ {trunc}{_RESET}")
-    elif form_data or param:
-        # Reconstruct request from available data
-        id_loc = candidate.request_data.get("id_location", "body")
-        print(f"  {_DIM}│ {method} {endpoint} HTTP/1.1{_RESET}")
-        if id_loc == "body":
-            print(f"  {_DIM}│ Content-Type: application/x-www-form-urlencoded{_RESET}")
-            body = dict(form_data) if form_data else dict(siblings)
-            if param and payload:
-                body[param] = payload
-            body_str = "&".join(f"{k}={v}" for k, v in body.items())
-            print(f"  {_DIM}│{_RESET}")
-            print(f"  {_DIM}│ {body_str[:200]}{_RESET}")
-        elif id_loc == "query":
-            qp = dict(siblings)
-            if param and payload:
-                qp[param] = payload
-            qs = "&".join(f"{k}={v}" for k, v in qp.items())
-            print(f"  {_DIM}│ Query: {qs[:200]}{_RESET}")
-        else:
-            print(f"  {_DIM}│ {method} {endpoint}/{payload} HTTP/1.1{_RESET}")
-    else:
-        print(f"  {_DIM}│ {method} {endpoint} HTTP/1.1{_RESET}")
-    print(f"  {_BOLD}└───────────────────────────────────────────────────────{_RESET}")
-
-    # ── Response display ──
     resp_data = getattr(candidate, "response_data", {}) or {}
     full_response = resp_data.get("full_response", "")
 
-    print(f"  {_BOLD}┌─ RESPONSE ─────────────────────────────────────────────{_RESET}")
+    # Build compact request line
+    if full_request:
+        req_lines = [l.strip() for l in full_request.split("\n") if l.strip()]
+        req_summary = req_lines[0] if req_lines else f"{method} {endpoint}"
+        body_lines = [l for l in req_lines[1:] if not l.startswith(("Host:", "Content-"))]
+        if body_lines:
+            req_summary += f" — {body_lines[-1][:100]}"
+    else:
+        id_loc = candidate.request_data.get("id_location", "body")
+        req_summary = f"{method} {endpoint}"
+        if id_loc == "body" and (form_data or param):
+            body = dict(form_data) if form_data else dict(siblings)
+            if param and payload:
+                body[param] = payload
+            req_summary += f" — {('&'.join(f'{k}={v}' for k, v in body.items()))[:100]}"
+        elif id_loc == "query" and param and payload:
+            req_summary += f"?{param}={str(payload)[:80]}"
+
+    print(f"\n  {_DIM}REQ:{_RESET} {req_summary[:140]}")
+
+    # Build compact response line
     if full_response:
-        resp_lines = [l for l in full_response.split("\n") if l.strip()]
-        for line in resp_lines[:10]:
-            trunc = line.strip()[:120]
-            print(f"  {_DIM}│ {trunc}{_RESET}")
-        if len(resp_lines) > 10:
-            # Save full response to file so user can view it
-            import pathlib
-            resp_dir = pathlib.Path("output") / "responses"
-            resp_dir.mkdir(parents=True, exist_ok=True)
-            resp_file = resp_dir / f"finding-{count:03d}-response.txt"
-            resp_file.write_text(full_response, encoding="utf-8")
-            print(f"  {_DIM}│ ... ({len(resp_lines) - 10} more lines){_RESET}")
-            print(f"  {_ORANGE}│ See full: cat {resp_file}{_RESET}")
+        resp_lines = [l.strip() for l in full_response.split("\n") if l.strip()]
+        status_line = resp_lines[0] if resp_lines else "?"
+        # Extract key headers
+        extras = []
+        for rl in resp_lines[1:6]:
+            rl_lower = rl.lower()
+            if rl_lower.startswith(("location:", "set-cookie:")):
+                extras.append(rl[:80])
+        resp_summary = status_line
+        if extras:
+            resp_summary += " | " + " | ".join(extras)
     else:
         status = resp_data.get("status", "?")
-        print(f"  {_DIM}│ HTTP {status}{_RESET}")
+        resp_summary = f"HTTP {status}"
         snippet = resp_data.get("body_snippet", "")
         if snippet:
-            for line in snippet.split("\n")[:5]:
-                trunc = line.strip()[:120]
-                if trunc:
-                    print(f"  {_DIM}│ {trunc}{_RESET}")
-        ev_detail = evidence.get("detail", "")
-        if ev_detail and not snippet:
-            print(f"  {_DIM}│ {ev_detail[:200]}{_RESET}")
-    print(f"  {_BOLD}└───────────────────────────────────────────────────────{_RESET}")
+            first_line = snippet.split("\n")[0].strip()[:100]
+            if first_line:
+                resp_summary += f" — {first_line}"
+
+    print(f"  {_DIM}RSP:{_RESET} {resp_summary[:140]}")
+
+    # Curl reproduce — single compact line
+    curl_cmd = build_curl_command(candidate)
+    if curl_cmd:
+        print(f"  {_ORANGE}curl:{_RESET} {_DIM}{curl_cmd[:160]}{_RESET}")
 
     print(f"{_BOLD}{'═' * w}{_RESET}")
 

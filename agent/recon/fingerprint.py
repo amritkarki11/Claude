@@ -166,6 +166,9 @@ _HTML_RULES: list[tuple[re.Pattern, str]] = [
 # ── Data classes ──────────────────────────────────────────────
 
 
+_VERSION_RE = re.compile(r"[/: ]([\d]+(?:\.[\d]+){0,3}(?:[-+][\w.]+)?)")
+
+
 @dataclass
 class TechSignal:
     """A single detected technology signal with evidence."""
@@ -173,6 +176,13 @@ class TechSignal:
     confidence: str = "medium"   # high / medium / low
     source: str = ""              # "header", "cookie", "html", "url"
     evidence: str = ""            # raw value that triggered detection
+    version: str = ""             # extracted version if found
+
+    def __post_init__(self):
+        if not self.version and self.evidence:
+            m = _VERSION_RE.search(self.evidence)
+            if m:
+                self.version = m.group(1)
 
 
 @dataclass

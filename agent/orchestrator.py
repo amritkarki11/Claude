@@ -674,8 +674,12 @@ class Orchestrator:
                     _emit("auth_bypass_fail")
 
             # Convert recon endpoints to EndpointInfo (with classification data)
+            _seen_eps: set[tuple[str, str]] = set()
             for ep in recon_inv.endpoints:
                 for method in ep.methods:
+                    if (ep.url, method) in _seen_eps:
+                        continue
+                    _seen_eps.add((ep.url, method))
                     param_names = [p["name"] for p in ep.params]
                     # Filter injection points for this method
                     method_points = [

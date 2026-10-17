@@ -509,7 +509,7 @@ class TestCaseMapper:
 
         # ── From fingerprinting ──
         if fingerprint_result:
-            signals = getattr(fingerprint_result, 'signals', set())
+            signals = getattr(fingerprint_result, 'signal_set', set())
             versions = getattr(fingerprint_result, 'versions', {})
             profile.technologies = sorted(signals)
             profile.server = next((s for s in signals if s in (
