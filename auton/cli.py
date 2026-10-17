@@ -103,14 +103,106 @@ def _run_recon(target: str, is_wildcard: bool, allports: bool,
     )
 
 
+def _build_scan_targets(report: dict) -> list[dict]:
+    """Extract scannable targets from the recon report.
+
+    Each target is a dict with: url, params, method, id_location, siblings.
+    Built from forms (primary) and parameterized endpoints (secondary).
+    """
+    from urllib.parse import urljoin
+
+    targets: list[dict] = []
+    seed_url = report["seed"]
+    seen: set[str] = set()
+
+    # Forms — the richest source of injection points
+    for form in report.get("forms", []):
+        fields = form.get("fields", [])
+        param_names = [f["name"] for f in fields if f.get("name")]
+        if not param_names:
+            continue
+
+        action = form.get("action", "")
+        if not action:
+            continue
+        if not action.startswith("http"):
+            action = urljoin(seed_url, action)
+
+        method = (form.get("method") or "GET").upper()
+        id_location = "body" if method == "POST" else "query"
+
+        # Default values for sibling fields so multi-field forms work
+        siblings = {}
+        for f in fields:
+            name = f.get("name", "")
+            if not name:
+                continue
+            ftype = f.get("type", "text").lower()
+            if ftype == "password":
+                siblings[name] = "Test1234!"
+            elif ftype == "email":
+                siblings[name] = "test@example.com"
+            elif ftype == "number":
+                siblings[name] = "1"
+            else:
+                siblings[name] = "test123"
+
+        key = f"{method}:{action}:{','.join(sorted(param_names))}"
+        if key in seen:
+            continue
+        seen.add(key)
+
+        targets.append({
+            "url": action,
+            "params": param_names,
+            "method": method,
+            "id_location": id_location,
+            "siblings": siblings,
+        })
+
+    # JS-extracted endpoints that have params
+    for ep in report.get("endpoints", []):
+        params = ep.get("params", [])
+        if not params:
+            continue
+        path = ep.get("path", "")
+        if not path:
+            continue
+        url = urljoin(seed_url, path)
+        method = (ep.get("method") or "GET").upper()
+
+        key = f"{method}:{url}:{','.join(sorted(params))}"
+        if key in seen:
+            continue
+        seen.add(key)
+
+        targets.append({
+            "url": url,
+            "params": params,
+            "method": method,
+            "id_location": "query",
+            "siblings": {},
+        })
+
+    return targets
+
+
 async def _async_fullscan(target: str, is_wildcard: bool, allports: bool,
                           console: Console) -> None:
     """Run recon + all vulnerability scanners."""
     report = await _async_recon(target, is_wildcard, allports, console)
 
-    if not report or not report.get("endpoints"):
+    if not report:
         console.print(
-            "[yellow]No endpoints discovered — skipping vulnerability scanners.[/yellow]\n"
+            "[yellow]No recon data — skipping vulnerability scanners.[/yellow]\n"
+        )
+        return
+
+    scan_targets = _build_scan_targets(report)
+    if not scan_targets:
+        console.print(
+            "[yellow]No injectable endpoints found (0 forms, 0 parameterized paths) "
+            "— skipping vulnerability scanners.[/yellow]\n"
         )
         return
 
@@ -130,6 +222,10 @@ async def _async_fullscan(target: str, is_wildcard: bool, allports: bool,
     console.print(
         f"\n[bold bright_magenta]— Vulnerability Scan: {report['host']} —[/bold bright_magenta]"
     )
+    console.print(
+        f"  [dim]{len(scan_targets)} injectable targets "
+        f"({sum(len(t['params']) for t in scan_targets)} total params)[/dim]"
+    )
 
     scanner_classes = [
         SqliScanner, XssScanner, SsrfScanner,
@@ -144,7 +240,6 @@ async def _async_fullscan(target: str, is_wildcard: bool, allports: bool,
     session = Session()
 
     async with HttpClient(verify_ssl=False, stealth=True) as client:
-        # Standard scanners (client, session)
         for scanner_cls in scanner_classes:
             name = scanner_cls.__name__.replace("Scanner", "")
             _status(console, f"Scanning for {name}")
@@ -156,15 +251,23 @@ async def _async_fullscan(target: str, is_wildcard: bool, allports: bool,
                 ]
                 if not matching_recipes:
                     matching_recipes = recipes[:1] if recipes else []
-                for recipe in matching_recipes:
-                    candidates = await scanner.detect(seed_url, recipe)
-                    if candidates:
-                        all_candidates.extend(candidates)
-                        for c in candidates:
-                            console.print(
-                                f"  [bright_magenta][{name}][/bright_magenta] "
-                                f"[yellow]{c.confidence}[/yellow] — {c.endpoint}"
-                            )
+
+                for st in scan_targets:
+                    for recipe in matching_recipes:
+                        candidates = await scanner.detect(
+                            st["url"], recipe,
+                            params=st["params"],
+                            method=st["method"],
+                            id_location=st["id_location"],
+                            siblings=st["siblings"],
+                        )
+                        if candidates:
+                            all_candidates.extend(candidates)
+                            for c in candidates:
+                                console.print(
+                                    f"  [bright_magenta][{name}][/bright_magenta] "
+                                    f"[yellow]{c.confidence}[/yellow] — {c.endpoint}"
+                                )
             except Exception as exc:
                 console.print(f"  [red]{name} error: {exc}[/red]")
 
@@ -180,15 +283,22 @@ async def _async_fullscan(target: str, is_wildcard: bool, allports: bool,
             ]
             if not matching_recipes:
                 matching_recipes = recipes[:1] if recipes else []
-            for recipe in matching_recipes:
-                candidates = await idor.detect(seed_url, recipe)
-                if candidates:
-                    all_candidates.extend(candidates)
-                    for c in candidates:
-                        console.print(
-                            f"  [bright_magenta][IDOR][/bright_magenta] "
-                            f"[yellow]{c.confidence}[/yellow] — {c.endpoint}"
-                        )
+            for st in scan_targets:
+                for recipe in matching_recipes:
+                    candidates = await idor.detect(
+                        st["url"], recipe,
+                        params=st["params"],
+                        method=st["method"],
+                        id_location=st["id_location"],
+                        siblings=st["siblings"],
+                    )
+                    if candidates:
+                        all_candidates.extend(candidates)
+                        for c in candidates:
+                            console.print(
+                                f"  [bright_magenta][IDOR][/bright_magenta] "
+                                f"[yellow]{c.confidence}[/yellow] — {c.endpoint}"
+                            )
         except Exception as exc:
             console.print(f"  [red]IDOR error: {exc}[/red]")
 
