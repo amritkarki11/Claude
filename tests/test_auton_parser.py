@@ -1,6 +1,6 @@
 """Tests for auton/router/parser.py — slash-command parser."""
 import pytest
-from auton.router.parser import parse, build_nmap_cmd, ParsedCommand
+from auton.router.parser import parse, build_nmap_cmd, ParsedCommand, _normalize_target
 
 
 class TestParse:
@@ -77,6 +77,47 @@ class TestParse:
     def test_whitespace_stripped(self):
         cmd = parse("  /exit  ")
         assert cmd.action == "exit"
+
+    def test_url_target_stripped_to_hostname(self):
+        cmd = parse("/recon https://demo.testfire.net/")
+        assert cmd.target == "demo.testfire.net"
+
+    def test_url_with_port_stripped(self):
+        cmd = parse("/recon https://example.com:8443/path")
+        assert cmd.target == "example.com"
+
+    def test_bare_domain_unchanged(self):
+        cmd = parse("/recon example.com")
+        assert cmd.target == "example.com"
+
+    def test_ip_unchanged(self):
+        cmd = parse("/recon 10.0.0.1")
+        assert cmd.target == "10.0.0.1"
+
+    def test_wildcard_preserved(self):
+        cmd = parse("/recon *.example.com")
+        assert cmd.target == "*.example.com"
+        assert cmd.is_wildcard
+
+
+class TestNormalizeTarget:
+    def test_https_url(self):
+        assert _normalize_target("https://example.com/path") == "example.com"
+
+    def test_http_url(self):
+        assert _normalize_target("http://example.com:8080/") == "example.com"
+
+    def test_bare_domain(self):
+        assert _normalize_target("example.com") == "example.com"
+
+    def test_domain_with_path(self):
+        assert _normalize_target("example.com/api/v1") == "example.com"
+
+    def test_wildcard_passthrough(self):
+        assert _normalize_target("*.example.com") == "*.example.com"
+
+    def test_ip_address(self):
+        assert _normalize_target("192.168.1.1") == "192.168.1.1"
 
 
 class TestBuildNmapCmd:

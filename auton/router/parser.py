@@ -18,7 +18,21 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
+from urllib.parse import urlparse
+
 logger = logging.getLogger(__name__)
+
+
+def _normalize_target(raw_target: str) -> str:
+    """Strip scheme, port, and path so nmap gets a bare hostname/IP."""
+    if raw_target.startswith("*."):
+        return raw_target
+    if "://" in raw_target:
+        parsed = urlparse(raw_target)
+        return parsed.hostname or raw_target
+    if "/" in raw_target:
+        return raw_target.split("/")[0]
+    return raw_target
 
 # The 14 scanner names from agent/scanners/
 _SCANNER_NAMES = [
@@ -86,6 +100,7 @@ def parse(raw: str) -> ParsedCommand:
                 error=f"Missing target. Usage: {cmd} [/allports] <target>",
             )
 
+        target = _normalize_target(target)
         is_wildcard = target.startswith("*.")
 
         return ParsedCommand(
