@@ -1,0 +1,22 @@
+# NoSQL Injection: inject NoSQL operators and JSON payloads into parameters
+# to bypass authentication or extract data from MongoDB/CouchDB/etc.
+id: nosqli-injection
+applies_to:
+  - api
+  - web
+tech_signals:
+  - rest-api
+  - json-api
+preconditions:
+  - an endpoint accepts user-supplied input that may flow into NoSQL queries
+detect:
+  - step: "Identify parameters that may be used in NoSQL database queries"
+  - step: "Inject NoSQL operator payloads ($ne, $gt, $regex) in JSON and query formats"
+    method: POST
+  - step: "Compare response length and status with baseline for auth bypass or data leak indicators"
+  - step: "Try MongoDB-specific tautology payloads and regex-based extraction"
+signal: "The response differs significantly from baseline when NoSQL operators are injected, indicating query manipulation"
+verify: "Replay the exact payload and confirm the same anomalous response appears consistently across multiple attempts"
+severity: critical
+remediation: "Use ODM/ORM libraries with parameterized queries; validate and sanitize all input before passing to NoSQL queries; disable server-side JavaScript execution in MongoDB; never pass raw user input to $where or similar operators"
+source: "CWE-943 (Improper Neutralization of Special Elements in Data Query Logic)"

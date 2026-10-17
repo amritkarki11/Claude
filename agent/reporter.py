@@ -34,22 +34,52 @@ _CWE_MAP = {
     "idor": "CWE-639",
     "bola": "CWE-639",
     "sqli": "CWE-89",
+    "sql-injection": "CWE-89",
     "xss": "CWE-79",
     "xxe": "CWE-611",
     "ssrf": "CWE-918",
     "auth-bypass": "CWE-287",
     "broken-access": "CWE-284",
+    "nosqli": "CWE-943",
+    "nosql-injection": "CWE-943",
+    "ssti": "CWE-1336",
+    "template-injection": "CWE-1336",
+    "cmdi": "CWE-78",
+    "command-injection": "CWE-78",
+    "os-command-injection": "CWE-78",
+    "lfi": "CWE-22",
+    "path-traversal": "CWE-22",
+    "file-inclusion": "CWE-98",
+    "csrf": "CWE-352",
+    "cross-site-request-forgery": "CWE-352",
+    "stored-xss": "CWE-79",
+    "open-redirect": "CWE-601",
 }
 
 _OWASP_MAP = {
     "idor": "A01:2021 — Broken Access Control",
     "bola": "A01:2021 — Broken Access Control",
     "sqli": "A03:2021 — Injection",
+    "sql-injection": "A03:2021 — Injection",
     "xss": "A03:2021 — Injection",
     "xxe": "A05:2021 — Security Misconfiguration",
     "ssrf": "A10:2021 — Server-Side Request Forgery",
     "auth-bypass": "A07:2021 — Identification and Authentication Failures",
     "broken-access": "A01:2021 — Broken Access Control",
+    "nosqli": "A03:2021 — Injection",
+    "nosql-injection": "A03:2021 — Injection",
+    "ssti": "A03:2021 — Injection",
+    "template-injection": "A03:2021 — Injection",
+    "cmdi": "A03:2021 — Injection",
+    "command-injection": "A03:2021 — Injection",
+    "os-command-injection": "A03:2021 — Injection",
+    "lfi": "A01:2021 — Broken Access Control",
+    "path-traversal": "A01:2021 — Broken Access Control",
+    "file-inclusion": "A03:2021 — Injection",
+    "csrf": "A01:2021 — Broken Access Control",
+    "cross-site-request-forgery": "A01:2021 — Broken Access Control",
+    "stored-xss": "A03:2021 — Injection",
+    "open-redirect": "A01:2021 — Broken Access Control",
 }
 
 _SEVERITY_CVSS = {
@@ -76,9 +106,94 @@ _REMEDIATION_MAP = {
         "Use parameterized queries / prepared statements for all database "
         "interactions. Apply input validation and implement a WAF rule."
     ),
+    "sql-injection": (
+        "Use parameterized queries / prepared statements for all database "
+        "interactions. Apply input validation and implement a WAF rule."
+    ),
     "xss": (
         "Encode all user-supplied output contextually (HTML, JS, URL). "
         "Implement Content-Security-Policy headers."
+    ),
+    "nosqli": (
+        "Use the database driver's built-in query builder instead of "
+        "constructing query objects from raw user input. Validate and "
+        "type-check all input — reject objects/arrays where strings are "
+        "expected. Disable server-side JavaScript execution ($where) if "
+        "not required."
+    ),
+    "nosql-injection": (
+        "Use the database driver's built-in query builder instead of "
+        "constructing query objects from raw user input. Validate and "
+        "type-check all input — reject objects/arrays where strings are "
+        "expected."
+    ),
+    "ssti": (
+        "Never pass user input directly into template strings. Use the "
+        "template engine's sandboxing mode (e.g. Jinja2 SandboxedEnvironment). "
+        "Treat user input as data, not code — render it via template variables, "
+        "not string concatenation. If user-controlled templates are required, "
+        "use a logic-less engine (e.g. Mustache)."
+    ),
+    "template-injection": (
+        "Never pass user input directly into template strings. Use the "
+        "template engine's sandboxing mode."
+    ),
+    "cmdi": (
+        "Avoid calling OS commands with user-supplied input. Use language-native "
+        "libraries instead of shell commands (e.g. Python's shutil instead of "
+        "os.system('cp ...')). If shell execution is unavoidable, use "
+        "parameterized APIs (e.g. subprocess with a list, not a string) and "
+        "apply strict allowlist validation on the input."
+    ),
+    "command-injection": (
+        "Avoid calling OS commands with user-supplied input. Use parameterized "
+        "APIs (subprocess with list arguments) and strict allowlist validation."
+    ),
+    "os-command-injection": (
+        "Avoid calling OS commands with user-supplied input. Use parameterized "
+        "APIs (subprocess with list arguments) and strict allowlist validation."
+    ),
+    "lfi": (
+        "Never use user-supplied input directly in file paths. Maintain an "
+        "allowlist of permitted file names or use indirect references (numeric "
+        "IDs mapped server-side). Normalize and validate paths — reject any "
+        "input containing '..' or path separators. Configure the application "
+        "to run with minimum filesystem permissions."
+    ),
+    "path-traversal": (
+        "Never use user-supplied input directly in file paths. Validate and "
+        "normalize paths, reject input containing '..' or path separators."
+    ),
+    "file-inclusion": (
+        "Never include files based on user input. Use an allowlist of "
+        "permitted includes and map user input to that list indirectly."
+    ),
+    "csrf": (
+        "Implement anti-CSRF tokens on all state-changing endpoints "
+        "(POST/PUT/PATCH/DELETE). Use a framework-provided CSRF middleware "
+        "(e.g. Django's CsrfViewMiddleware, Express csurf). Validate the "
+        "token on the server for every state-changing request. Set the "
+        "SameSite cookie attribute to Strict or Lax as an additional layer."
+    ),
+    "cross-site-request-forgery": (
+        "Implement anti-CSRF tokens on all state-changing endpoints. "
+        "Use framework-provided CSRF middleware and set SameSite cookie "
+        "attribute to Strict or Lax."
+    ),
+    "stored-xss": (
+        "Sanitize and encode all user-supplied content before storing AND "
+        "before rendering. Use a context-aware output encoding library "
+        "(e.g. DOMPurify for HTML, textContent for DOM insertion). "
+        "Implement Content-Security-Policy headers with strict script-src. "
+        "Validate input on the server side — reject or strip HTML tags "
+        "where rich text is not required."
+    ),
+    "open-redirect": (
+        "Validate redirect targets against an allowlist of permitted "
+        "domains or paths. Use relative URLs for internal redirects instead "
+        "of accepting full URLs from user input. If external redirects are "
+        "required, show an interstitial warning page. Never blindly redirect "
+        "to a user-supplied URL parameter."
     ),
 }
 
@@ -382,22 +497,41 @@ class Reporter:
 
     # ── Internal helpers ─────────────────────────────────────
 
+    # Map scanner class names to canonical vuln classes
+    _SCANNER_VULN_MAP = {
+        "IdorScanner": "idor",
+        "SqliScanner": "sqli",
+        "XssScanner": "xss",
+        "SsrfScanner": "ssrf",
+        "NosqliScanner": "nosqli",
+        "SstiScanner": "ssti",
+        "CmdiScanner": "cmdi",
+        "LfiScanner": "lfi",
+        "CsrfScanner": "csrf",
+        "StoredXssScanner": "stored-xss",
+        "OpenRedirectScanner": "open-redirect",
+        "AuthBypassDiscovery": "auth-bypass",
+    }
+
     def _infer_vuln_class(self, candidate: Candidate) -> str:
+        # Check scanner class name first (most reliable)
+        if candidate.scanner in self._SCANNER_VULN_MAP:
+            return self._SCANNER_VULN_MAP[candidate.scanner]
+        # Fallback: check recipe ID
         rid = candidate.recipe_id.lower()
         for vc in _CWE_MAP:
             if vc in rid:
                 return vc
-        if candidate.scanner == "IdorScanner":
-            return "idor"
         return "unknown"
 
     def _infer_vuln_class_from_dict(self, entry: dict) -> str:
+        scanner = entry.get("scanner", "")
+        if scanner in self._SCANNER_VULN_MAP:
+            return self._SCANNER_VULN_MAP[scanner]
         rid = entry.get("recipe_id", "").lower()
         for vc in _CWE_MAP:
             if vc in rid:
                 return vc
-        if entry.get("scanner") == "IdorScanner":
-            return "idor"
         return "unknown"
 
     def _build_title(self, candidate: Candidate, vuln_class: str) -> str:
@@ -426,8 +560,9 @@ class Reporter:
     def _build_description(self, candidate: Candidate, result: VerifyResult,
                            vuln_class: str) -> str:
         req = candidate.request_data
-        id_param = req.get("id_param", "identifier")
+        id_param = req.get("id_param", req.get("param", "identifier"))
         id_location = req.get("id_location", "body")
+        evidence = candidate.evidence
 
         if vuln_class == "idor":
             return (
@@ -437,6 +572,47 @@ class Reporter:
                 f"behalf of the victim. Verification confirmed the issue across "
                 f"{result.replays} replay(s) — {result.reason}."
             )
+        elif vuln_class in ("sqli", "sql-injection"):
+            technique = evidence.get("technique", "error-based")
+            db_type = evidence.get("db_type", "unknown")
+            return (
+                f"The parameter `{id_param}` at `{candidate.endpoint}` is vulnerable "
+                f"to SQL injection ({technique}). The backend database appears to be "
+                f"{db_type}. The vulnerability was confirmed through a multi-step "
+                f"verification chain (BREAK → FIX → BOOLEAN → TIME)."
+            )
+        elif vuln_class in ("nosqli", "nosql-injection"):
+            technique = evidence.get("technique", "operator-injection")
+            return (
+                f"The parameter `{id_param}` at `{candidate.endpoint}` is vulnerable "
+                f"to NoSQL injection ({technique}). An attacker can manipulate database "
+                f"queries by injecting MongoDB operators or JavaScript expressions."
+            )
+        elif vuln_class in ("ssti", "template-injection"):
+            engine = evidence.get("engine", "unknown")
+            technique = evidence.get("technique", "math-probe")
+            return (
+                f"The parameter `{id_param}` at `{candidate.endpoint}` is vulnerable "
+                f"to Server-Side Template Injection ({technique}). The template engine "
+                f"appears to be {engine}. An attacker can inject template expressions "
+                f"that are evaluated on the server."
+            )
+        elif vuln_class in ("cmdi", "command-injection", "os-command-injection"):
+            technique = evidence.get("technique", "command-injection")
+            separator = evidence.get("separator", "unknown")
+            return (
+                f"The parameter `{id_param}` at `{candidate.endpoint}` is vulnerable "
+                f"to OS command injection ({technique}, separator: {separator}). "
+                f"An attacker can execute arbitrary system commands on the server."
+            )
+        elif vuln_class in ("lfi", "path-traversal", "file-inclusion"):
+            target_file = evidence.get("target_file", "/etc/passwd")
+            technique = evidence.get("technique", "path-traversal")
+            return (
+                f"The parameter `{id_param}` at `{candidate.endpoint}` is vulnerable "
+                f"to path traversal / local file inclusion ({technique}). The file "
+                f"`{target_file}` was successfully read from the server filesystem."
+            )
         return (
             f"A {vuln_class.upper()} vulnerability was identified at "
             f"`{candidate.endpoint}`. {result.reason}."
@@ -444,26 +620,120 @@ class Reporter:
 
     def _build_affected(self, candidate: Candidate) -> str:
         req = candidate.request_data
-        param = req.get("id_param", "N/A")
+        param = req.get("id_param", req.get("param", "N/A"))
         return f"{candidate.method} {candidate.endpoint} (param: {param})"
+
+    def _build_curl(self, candidate: Candidate) -> str:
+        """Build a curl command to reproduce the finding."""
+        from .display import build_curl_command
+        return build_curl_command(candidate)
 
     def _build_steps(self, candidate: Candidate,
                      result: VerifyResult) -> list[str]:
         req = candidate.request_data
-        session_type = req.get("session", "attacker")
-        id_param = req.get("id_param", "id")
-        id_value = req.get("id_value", "VICTIM_ID")
-        id_location = req.get("id_location", "body")
+        evidence = candidate.evidence
+        vuln_class = self._infer_vuln_class(candidate)
 
-        steps = [
-            f"Authenticate as the {session_type} user and obtain a valid session",
-            f"Send a {candidate.method} request to `{candidate.endpoint}`",
-            f"Set `{id_param}` = `{id_value}` in the request {id_location}",
-            f"Observe: the server returns HTTP {candidate.evidence.get('status', 200)} "
-            f"with a success response",
-            f"Repeat {result.replays} time(s) — all replays return success, "
-            f"confirming the vulnerability is consistent",
-        ]
+        # Generic params
+        param = req.get("id_param", req.get("param", "id"))
+        id_location = req.get("id_location", req.get("location", "body"))
+
+        # Build curl command for reproduction
+        curl_cmd = self._build_curl(candidate)
+
+        if vuln_class == "idor":
+            session_type = req.get("session", "attacker")
+            id_value = req.get("id_value", "VICTIM_ID")
+            steps = [
+                f"Authenticate as the {session_type} user and obtain a valid session",
+                f"Send a {candidate.method} request to `{candidate.endpoint}`",
+                f"Set `{param}` = `{id_value}` in the request {id_location}",
+                f"Observe: the server returns HTTP {evidence.get('status', 200)} "
+                f"with a success response",
+                f"Repeat {result.replays} time(s) — all replays return success, "
+                f"confirming the vulnerability is consistent",
+            ]
+
+        elif vuln_class in ("sqli", "sql-injection"):
+            payload = req.get("payload", "'")
+            fix_payload = req.get("fix_payload", "''")
+            technique = req.get("technique", "error-based")
+            siblings = req.get("sibling_fields", {})
+            sibling_note = ""
+            if siblings:
+                sibling_note = f" (with sibling fields: {', '.join(f'{k}={v}' for k, v in siblings.items())})"
+            steps = [
+                f"Navigate to `{candidate.endpoint}`",
+                f"In the `{param}` parameter ({id_location}), inject: `{payload}`{sibling_note}",
+                f"Observe: the server returns a database error (HTTP {evidence.get('break_status', 500)})",
+                f"Inject the FIX payload: `{fix_payload}` in the same parameter",
+                f"Observe: normal response is restored (HTTP {evidence.get('fix_status', 200)}), "
+                f"confirming the input reaches the SQL query ({technique})",
+            ]
+
+        elif vuln_class in ("nosqli", "nosql-injection"):
+            payload = req.get("payload", "")
+            technique = evidence.get("technique", "operator-injection")
+            steps = [
+                f"Navigate to `{candidate.endpoint}`",
+                f"In the `{param}` parameter ({id_location}), inject: `{payload}`",
+                f"Observe: the server response indicates successful query manipulation "
+                f"({technique})",
+                f"The verification chain confirmed: operator injection → tautology "
+                f"comparison → consistent behavior",
+            ]
+
+        elif vuln_class in ("ssti", "template-injection"):
+            payload = req.get("payload", "{{7*7}}")
+            engine = evidence.get("engine", "unknown")
+            steps = [
+                f"Navigate to `{candidate.endpoint}`",
+                f"In the `{param}` parameter ({id_location}), inject: `{payload}`",
+                f"Observe: the server evaluates the math expression and returns the "
+                f"result (e.g., 49) in the response body",
+                f"Template engine identified: {engine}",
+                f"A confirmation probe with a different expression verified the finding",
+            ]
+
+        elif vuln_class in ("cmdi", "command-injection", "os-command-injection"):
+            payload = req.get("payload", "")
+            separator = evidence.get("separator", req.get("separator", "unknown"))
+            technique = evidence.get("technique", req.get("technique", "output-based"))
+            steps = [
+                f"Navigate to `{candidate.endpoint}`",
+                f"In the `{param}` parameter ({id_location}), inject: `{payload}`",
+                f"The payload uses the `{separator}` separator to chain an OS command",
+                f"Observe: the server executes the injected command ({technique})",
+                f"A second verification (math or time-based) confirmed the finding "
+                f"is not a false positive",
+            ]
+
+        elif vuln_class in ("lfi", "path-traversal", "file-inclusion"):
+            payload = req.get("payload", "")
+            target_file = evidence.get("target_file", "/etc/passwd")
+            depth = evidence.get("traversal_depth", "unknown")
+            steps = [
+                f"Navigate to `{candidate.endpoint}`",
+                f"In the `{param}` parameter ({id_location}), inject: `{payload}`",
+                f"Observe: the server returns the contents of `{target_file}` "
+                f"(traversal depth: {depth})",
+                f"A depth-vary check confirmed the traversal is real — different "
+                f"depths return the same file content",
+            ]
+
+        else:
+            # Generic fallback
+            payload = req.get("payload", req.get("id_value", "PAYLOAD"))
+            steps = [
+                f"Send a {candidate.method} request to `{candidate.endpoint}`",
+                f"Set `{param}` = `{payload}` in the request {id_location}",
+                f"Observe: the server response indicates vulnerability",
+            ]
+
+        # Append curl command for reproduction
+        if curl_cmd:
+            steps.append(f"**Reproduce with curl:**\n```\n{curl_cmd}\n```")
+
         return steps
 
     def _build_impact(self, vuln_class: str,
@@ -476,31 +746,84 @@ class Reporter:
                 "account takeover, or triggering sensitive actions (e.g., OTP "
                 "generation) for arbitrary users."
             )
-        elif vuln_class == "sqli":
+        elif vuln_class in ("sqli", "sql-injection"):
             return (
                 "An attacker can extract, modify, or delete data from the "
                 "backend database. In severe cases, this may lead to remote "
                 "code execution on the database server."
             )
+        elif vuln_class in ("nosqli", "nosql-injection"):
+            return (
+                "An attacker can bypass authentication, extract data from the "
+                "NoSQL database, or manipulate query results. In cases where "
+                "$where JavaScript injection is possible, this can lead to "
+                "denial of service or server-side code execution."
+            )
+        elif vuln_class in ("ssti", "template-injection"):
+            return (
+                "An attacker can execute arbitrary code on the server through "
+                "template injection. Depending on the template engine and "
+                "configuration, this can lead to remote code execution, "
+                "reading sensitive files, or full server compromise."
+            )
+        elif vuln_class in ("cmdi", "command-injection", "os-command-injection"):
+            return (
+                "An attacker can execute arbitrary operating system commands "
+                "on the server. This typically leads to full server compromise, "
+                "data exfiltration, lateral movement, and persistent backdoor "
+                "installation."
+            )
+        elif vuln_class in ("lfi", "path-traversal", "file-inclusion"):
+            return (
+                "An attacker can read arbitrary files from the server "
+                "filesystem, including configuration files, source code, and "
+                "credentials. If combined with file upload or log poisoning, "
+                "this may escalate to remote code execution."
+            )
         return "Unauthorized access to resources or functionality."
 
     def _format_request(self, candidate: Candidate) -> str:
         req = candidate.request_data
-        id_param = req.get("id_param", "id")
-        id_value = req.get("id_value", "VALUE")
+
+        # Prefer exact captured request if available
+        full_req = req.get("full_request", "")
+        if full_req:
+            return full_req
+
+        # Fallback: build from structured data
+        id_param = req.get("id_param", req.get("param", ""))
+        id_value = req.get("id_value", req.get("payload", "VALUE"))
         id_location = req.get("id_location", "body")
+        siblings = req.get("sibling_fields", {})
+
+        if not id_param:
+            # No param info — return minimal request line
+            return f"{candidate.method} {candidate.endpoint} HTTP/1.1"
 
         lines = [f"{candidate.method} {candidate.endpoint} HTTP/1.1"]
         if id_location == "body":
-            lines.append("Content-Type: application/json")
+            lines.append("Content-Type: application/x-www-form-urlencoded")
             lines.append("")
-            lines.append(json.dumps({id_param: id_value}))
+            body_params = dict(siblings)
+            body_params[id_param] = id_value
+            lines.append("&".join(f"{k}={v}" for k, v in body_params.items()))
         elif id_location == "query":
-            lines[0] = f"{candidate.method} {candidate.endpoint}?{id_param}={id_value} HTTP/1.1"
+            query_parts = [f"{id_param}={id_value}"]
+            for k, v in siblings.items():
+                query_parts.append(f"{k}={v}")
+            lines[0] = f"{candidate.method} {candidate.endpoint}?{'&'.join(query_parts)} HTTP/1.1"
         return "\n".join(lines)
 
     def _format_response(self, candidate: Candidate,
                          result: VerifyResult) -> str:
+        resp = candidate.response_data
+
+        # Prefer exact captured response if available
+        full_resp = resp.get("full_response", "")
+        if full_resp:
+            return full_resp
+
+        # Fallback: build from evidence
         status = candidate.evidence.get("status", 200)
         body = candidate.evidence.get("body_snippet", "")
         if not body:

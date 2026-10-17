@@ -29,6 +29,8 @@ class ScopeError(Exception):
 
 
 def host_of(target: str) -> str:
+    # Normalize backslashes to forward slashes to prevent parser confusion
+    target = target.replace("\\", "/")
     p = urlparse(target if "//" in target else f"//{target}")
     return (p.hostname or "").lower()
 
@@ -62,7 +64,28 @@ def check(target: str) -> str:
             "OUT OF SCOPE: no allowlist configured — refusing to run. "
             "Set scope.allowed_hosts in config.yaml or pass --scope/--target."
         )
+
+    # Only allow http and https schemes
+    normalized = target.replace("\\", "/")
+    parsed = urlparse(normalized if "//" in normalized else f"//{normalized}")
+    if parsed.scheme and parsed.scheme not in ("http", "https", ""):
+        raise ScopeError(f"OUT OF SCOPE: scheme {parsed.scheme!r} not allowed (http/https only)")
+
+    # Check port: if the URL has a non-standard port, require explicit
+    # "host:port" in the allowlist — bare hostnames match only port-less URLs
     h = host_of(target)
-    if h not in ALLOWED:
+    try:
+        port = parsed.port
+    except ValueError:
+        raise ScopeError(f"OUT OF SCOPE: malformed URL {target!r}")
+    if port is not None:
+        host_with_port = f"{h}:{port}"
+        if host_with_port not in ALLOWED and h not in ALLOWED:
+            raise ScopeError(f"OUT OF SCOPE: {host_with_port!r} not in allowlist {sorted(ALLOWED)}")
+        # Even if bare host is in ALLOWED, non-standard ports need explicit entry
+        if port not in (80, 443) and host_with_port not in ALLOWED:
+            raise ScopeError(f"OUT OF SCOPE: non-standard port {host_with_port!r} not in allowlist {sorted(ALLOWED)}")
+    elif h not in ALLOWED:
         raise ScopeError(f"OUT OF SCOPE: {h!r} not in allowlist {sorted(ALLOWED)}")
+
     return target

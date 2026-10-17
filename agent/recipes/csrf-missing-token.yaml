@@ -1,0 +1,21 @@
+# Cross-Site Request Forgery: check if state-changing endpoints lack
+# CSRF tokens or other anti-forgery protections.
+id: csrf-missing-token
+applies_to:
+  - web
+tech_signals:
+  - html-response
+  - session-cookie
+preconditions:
+  - an endpoint performs state-changing operations via POST/PUT/DELETE
+  - the application uses cookie-based session management
+detect:
+  - step: "Identify state-changing endpoints (forms with POST method, account settings, password change)"
+  - step: "Check if the form includes a CSRF token field (csrf_token, _token, authenticity_token, __RequestVerificationToken)"
+  - step: "Submit the form without the CSRF token or with a modified token and check if the request succeeds"
+  - step: "Check for SameSite cookie attribute and other anti-CSRF headers"
+signal: "A state-changing request succeeds without a valid CSRF token, and cookies lack SameSite=Strict/Lax"
+verify: "Replay the request from a cross-origin context simulation (removing Referer/Origin headers, using a different or missing CSRF token) and confirm the action still succeeds"
+severity: medium
+remediation: "Implement anti-CSRF tokens on all state-changing forms; set SameSite=Lax or Strict on session cookies; validate Origin and Referer headers; use the framework's built-in CSRF protection"
+source: "CWE-352 (Cross-Site Request Forgery)"

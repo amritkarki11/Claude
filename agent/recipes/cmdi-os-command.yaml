@@ -1,0 +1,22 @@
+# OS Command Injection: inject shell metacharacters into parameters
+# and check if the server executes system commands.
+id: cmdi-os-command
+applies_to:
+  - api
+  - web
+tech_signals:
+  - rest-api
+  - shell-exec
+preconditions:
+  - an endpoint accepts input that may be passed to system command execution
+detect:
+  - step: "Identify parameters that might flow into OS commands (filename, host, ip, path, cmd)"
+  - step: "Inject time-based payloads (;sleep 5, |sleep 5, $(sleep 5)) and measure response time"
+    method: GET
+  - step: "Inject output-based payloads (;id, |whoami, $(cat /etc/passwd)) and check for command output in response"
+  - step: "Try both Unix and Windows command separators (;, |, &&, ||, `, $())"
+signal: "Response time increases significantly with sleep payloads, or command output appears in the response body"
+verify: "Replay the time-based payload and confirm consistent timing delay across multiple attempts; for output-based, confirm the same system output appears"
+severity: critical
+remediation: "Avoid passing user input to system commands entirely; use language-native APIs instead of shell execution; if unavoidable, use strict allowlists and parameterized command execution; never use shell=True with user input"
+source: "CWE-78 (OS Command Injection)"

@@ -99,8 +99,7 @@ class SsrfVerifier(Verifier):
         elif id_location == "body":
             return await self.client.post(
                 endpoint, session=self.session,
-                json={param: value},
-                headers={"Content-Type": "application/json"},
+                data={param: value},
             )
         else:
             raise ValueError(f"Unknown id_location: {id_location}")

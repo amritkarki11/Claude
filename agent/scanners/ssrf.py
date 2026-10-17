@@ -157,17 +157,21 @@ class SsrfScanner(Scanner):
             return None
 
     async def _send(self, target: str, param: str, value: str,
-                    method: str, id_location: str):
+                    method: str, id_location: str,
+                    *, siblings: dict[str, str] | None = None):
         if id_location == "query":
+            params = dict(siblings) if siblings else {}
+            params[param] = value
             return await self.client.request(
                 method, target, session=self.session,
-                params={param: value},
+                params=params,
             )
         elif id_location == "body":
+            data = dict(siblings) if siblings else {}
+            data[param] = value
             return await self.client.post(
                 target, session=self.session,
-                json={param: value},
-                headers={"Content-Type": "application/json"},
+                data=data,
             )
         else:
             raise ValueError(f"SSRF scanner doesn't support id_location: {id_location}")

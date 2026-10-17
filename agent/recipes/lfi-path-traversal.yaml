@@ -1,0 +1,22 @@
+# Local File Inclusion / Path Traversal: inject directory traversal sequences
+# into file-related parameters to read arbitrary server files.
+id: lfi-path-traversal
+applies_to:
+  - api
+  - web
+tech_signals:
+  - rest-api
+  - file-parameter
+preconditions:
+  - an endpoint accepts a file path, filename, or template parameter
+detect:
+  - step: "Identify parameters that reference files (file, page, template, path, include, doc)"
+  - step: "Inject traversal payloads (../../../etc/passwd, ..\\..\\windows\\win.ini)"
+    method: GET
+  - step: "Check response for file content signatures (root:x:0, [extensions], etc.)"
+  - step: "Try encoding bypasses (..%2f, %2e%2e/, double URL encoding) if basic traversal is filtered"
+signal: "The response contains recognizable content from a known system file (passwd, win.ini, etc.)"
+verify: "Replay the exact traversal payload and confirm the same file content appears in the response; try a different known file to rule out false positives"
+severity: high
+remediation: "Use allowlists for permitted file paths; resolve and validate the canonical path before file access; do not pass user input directly to file system APIs; use chroot or containerization to limit filesystem access"
+source: "CWE-22 (Path Traversal)"

@@ -30,18 +30,27 @@ class XssVerifier(Verifier):
         param = req.get("param", "q")
         payload = req.get("payload", "<script>alert(1)</script>")
         id_location = req.get("id_location", "query")
+        siblings = req.get("siblings", {})
 
         successes = 0
         responses = []
+        csp_blocks = False
 
         for i in range(replays):
             try:
                 resp = await self._send(
                     candidate.endpoint, param, payload,
-                    candidate.method, id_location
+                    candidate.method, id_location, siblings=siblings
                 )
                 body = resp.text
                 reflected = self._is_reflected(payload, body)
+
+                # Check CSP on first replay
+                if i == 0:
+                    csp = resp.headers.get("content-security-policy", "")
+                    if csp and self._csp_blocks_inline(csp):
+                        csp_blocks = True
+
                 responses.append({
                     "replay": i + 1,
                     "status": resp.status_code,
@@ -52,10 +61,17 @@ class XssVerifier(Verifier):
             except Exception as e:
                 responses.append({"replay": i + 1, "error": str(e)})
 
-        return self._make_verdict(candidate, replays, successes, responses)
+        return self._make_verdict(candidate, replays, successes, responses,
+                                  csp_blocks=csp_blocks)
 
-    def _make_verdict(self, candidate, replays, successes, responses):
-        if successes == replays:
+    def _make_verdict(self, candidate, replays, successes, responses,
+                      *, csp_blocks: bool = False):
+        if csp_blocks:
+            # CSP blocks inline scripts — reflected but not exploitable
+            verdict = Verdict.FALSE
+            reason = (f"Payload reflected in {successes}/{replays} replays but "
+                      "CSP script-src blocks inline script execution")
+        elif successes == replays:
             verdict = Verdict.CONFIRMED
             reason = f"All {replays} replays reflected payload — XSS confirmed"
         elif successes == 0:
@@ -69,7 +85,8 @@ class XssVerifier(Verifier):
             candidate=candidate,
             verdict=verdict,
             replays=replays,
-            evidence={"responses": responses, "successes": successes},
+            evidence={"responses": responses, "successes": successes,
+                      "csp_blocks_inline": csp_blocks},
             reason=reason,
         )
 
@@ -84,16 +101,44 @@ class XssVerifier(Verifier):
                 return True
         return False
 
-    async def _send(self, endpoint, param, value, method, id_location):
+    @staticmethod
+    def _csp_blocks_inline(csp: str) -> bool:
+        """Check if CSP blocks inline script execution."""
+        if not csp:
+            return False
+        csp_lower = csp.lower()
+        directives = {}
+        for part in csp_lower.split(";"):
+            part = part.strip()
+            if not part:
+                continue
+            tokens = part.split()
+            if tokens:
+                directives[tokens[0]] = tokens[1:]
+        sources = directives.get("script-src", directives.get("default-src", []))
+        if not sources:
+            return False
+        if "'unsafe-inline'" in sources:
+            return False
+        if "'none'" in sources:
+            return True
+        return True  # Sources listed without unsafe-inline = blocks inline
+
+    async def _send(self, endpoint, param, value, method, id_location,
+                    *, siblings: dict | None = None):
         if id_location == "query":
+            params = dict(siblings) if siblings else {}
+            params[param] = value
             return await self.client.request(
                 method, endpoint, session=self.session,
-                params={param: value},
+                params=params,
             )
         elif id_location == "body":
+            data = dict(siblings) if siblings else {}
+            data[param] = value
             return await self.client.post(
                 endpoint, session=self.session,
-                data={param: value},
+                data=data,
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
         else:

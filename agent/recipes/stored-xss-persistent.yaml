@@ -1,0 +1,23 @@
+# Stored Cross-Site Scripting: inject payloads via input endpoints and
+# check if they persist and render unencoded on output pages.
+id: stored-xss-persistent
+applies_to:
+  - api
+  - web
+tech_signals:
+  - rest-api
+  - html-response
+preconditions:
+  - an endpoint stores user input (comments, profiles, messages, feedback forms)
+  - a separate page or API renders the stored content
+detect:
+  - step: "Identify input endpoints that store user data (POST forms, PUT APIs)"
+  - step: "Submit a unique canary string and locate where it renders on output pages"
+  - step: "Submit HTML/JS payloads via the storage endpoint"
+    method: POST
+  - step: "Fetch the output page and check if the payload appears unencoded and in executable context"
+signal: "An injected script payload persists in storage and renders unencoded when the output page is viewed"
+verify: "Fetch the output page again and confirm the payload is still present and unencoded; check CSP headers on the output page"
+severity: high
+remediation: "HTML-encode all stored user content on output; implement Content-Security-Policy; validate and sanitize input on storage; use framework auto-escaping"
+source: "CWE-79 (Cross-site Scripting — Stored)"

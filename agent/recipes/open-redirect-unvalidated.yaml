@@ -1,0 +1,22 @@
+# Open Redirect: inject external URLs into redirect parameters
+# and check if the server redirects to attacker-controlled domains.
+id: open-redirect-unvalidated
+applies_to:
+  - api
+  - web
+tech_signals:
+  - rest-api
+  - redirect-parameter
+preconditions:
+  - an endpoint accepts a URL or path parameter used for redirection (redirect, url, next, return, returnTo, goto, dest)
+detect:
+  - step: "Identify parameters that control redirects (url, redirect, next, return, returnTo, goto, dest, continue)"
+  - step: "Inject external URLs (https://evil.com) and protocol-relative URLs (//evil.com)"
+    method: GET
+  - step: "Check if the response is a 3xx redirect with Location header pointing to the injected domain"
+  - step: "Try bypass techniques (///evil.com, /\\evil.com, https://trusted.com@evil.com) if direct injection is filtered"
+signal: "The server returns a 3xx redirect with a Location header pointing to an attacker-controlled external domain"
+verify: "Replay the payload and confirm the redirect Location header consistently points to the external domain"
+severity: medium
+remediation: "Use allowlists for permitted redirect destinations; validate that redirect targets are relative paths or match trusted domains; never pass unvalidated URLs to redirect responses"
+source: "CWE-601 (URL Redirection to Untrusted Site)"

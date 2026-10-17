@@ -1,0 +1,22 @@
+# Server-Side Template Injection: inject template syntax into parameters
+# and check if the server evaluates them, indicating code execution.
+id: ssti-template-injection
+applies_to:
+  - api
+  - web
+tech_signals:
+  - rest-api
+  - html-response
+preconditions:
+  - an endpoint reflects user input that may pass through a template engine
+detect:
+  - step: "Identify parameters whose values are reflected in the response"
+  - step: "Inject template expression payloads ({{7*7}}, ${7*7}, #{7*7}, etc.)"
+    method: GET
+  - step: "Check if the evaluated result (49) appears in the response instead of the raw expression"
+  - step: "Try engine-specific payloads for Jinja2, Twig, Freemarker, Velocity, Mako"
+signal: "The response contains the computed result of a math expression instead of the raw template syntax"
+verify: "Replay with a different math expression and confirm the new computed result appears in the response"
+severity: critical
+remediation: "Never pass user input directly into template strings; use template engines in sandbox mode; separate template logic from user data; apply strict input validation"
+source: "CWE-1336 (Server-Side Template Injection)"

@@ -12,6 +12,7 @@ import abc
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
+from urllib.parse import urlparse, urlencode
 
 from ..http import HttpClient, Session
 from ..recipes.schema import Recipe
@@ -87,3 +88,47 @@ class Scanner(abc.ABC):
             request_data=request_data or {},
             response_data=response_data or {},
         )
+
+    @staticmethod
+    def capture_request(resp) -> str:
+        """Build an exact HTTP request string from an httpx Response."""
+        try:
+            req = resp.request
+            parsed = urlparse(str(req.url))
+            path_qs = parsed.path or "/"
+            if parsed.query:
+                path_qs += "?" + parsed.query
+            lines = [f"{req.method} {path_qs} HTTP/1.1"]
+            lines.append(f"Host: {parsed.hostname}")
+            for name, value in req.headers.items():
+                if name.lower() not in ("host", "transfer-encoding"):
+                    lines.append(f"{name}: {value}")
+            body = ""
+            if req.content:
+                body = req.content.decode("utf-8", errors="replace")
+            if body:
+                lines.append("")
+                lines.append(body[:2000])
+            return "\n".join(lines)
+        except Exception:
+            return ""
+
+    @staticmethod
+    def capture_response(resp) -> str:
+        """Build an exact HTTP response string from an httpx Response."""
+        try:
+            lines = [f"HTTP/1.1 {resp.status_code}"]
+            for name, value in resp.headers.items():
+                if name.lower() in ("content-type", "content-length",
+                                    "content-security-policy", "x-xss-protection",
+                                    "set-cookie", "server", "location",
+                                    "x-frame-options", "x-content-type-options"):
+                    lines.append(f"{name}: {value}")
+            body = resp.text[:2000]
+            if len(resp.text) > 2000:
+                body += "\n[... truncated ...]"
+            lines.append("")
+            lines.append(body)
+            return "\n".join(lines)
+        except Exception:
+            return ""
