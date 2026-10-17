@@ -1,20 +1,21 @@
-"""Startup banner — heavy block AUTON logo with robot and attribution."""
+"""Startup banner — massive industrial AUTON logo with robot."""
 from __future__ import annotations
 
 from rich.console import Console
 from rich.text import Text
 
-# Large heavy block letters + robot on the right
-# Each line: (AUTON text, robot part)
+# Heavy industrial block AUTON (ansi_shadow style) + robot
+# Each tuple: (AUTON text, robot part)
 _BANNER_LINES = [
-    ("    ████      ██    ██   ████████    ██████     ██    ██ ", "    ▄█████▄    "),
-    ("   ██  ██     ██    ██      ██      ██    ██    ███   ██ ", "   ██ ▄▄▄ ██   "),
-    ("  ██    ██    ██    ██      ██      ██    ██    ████  ██ ", "   ██ ▀█▀ ██   "),
-    ("  ████████    ██    ██      ██      ██    ██    ██ ██ ██ ", "  ████████████  "),
-    ("  ██    ██    ██    ██      ██      ██    ██    ██  ████ ", "  ██ ██ ██ ██  "),
-    ("  ██    ██    ██    ██      ██      ██    ██    ██   ███ ", "  ██ █████ ██  "),
-    ("  ██    ██     ██████       ██       ██████     ██    ██ ", "  ▀██████████▀  "),
-    ("                                                        ", "    ██▀ ▀██     "),
+    ("                                                  ", "    ╔══════╗   "),
+    (" █████╗ ██╗   ██╗████████╗ ██████╗ ███╗   ██╗   ", "    ║ ⊙  ⊙ ║   "),
+    ("██╔══██╗██║   ██║╚══██╔══╝██╔═══██╗████╗  ██║   ", "    ║  ──  ║   "),
+    ("███████║██║   ██║   ██║   ██║   ██║██╔██╗ ██║   ", "    ╠══════╣   "),
+    ("██╔══██║██║   ██║   ██║   ██║   ██║██║╚██╗██║   ", "   ╔╩══════╩╗  "),
+    ("██║  ██║╚██████╔╝   ██║   ╚██████╔╝██║ ╚████║   ", "   ║ ▓▓▓▓▓▓ ║  "),
+    ("╚═╝  ╚═╝ ╚═════╝    ╚═╝    ╚═════╝ ╚═╝  ╚═══╝  ", "   ╚═╦════╦═╝  "),
+    ("                                                  ", "     ║    ║    "),
+    ("                                                  ", "    ═╩═  ═╩═   "),
 ]
 
 _TAGLINE = "[ Autonomous Pentesting Agent ]"
@@ -25,7 +26,7 @@ _ROW_COLORS = ["grey70"]
 
 
 def print_banner(console: Console | None = None) -> None:
-    """Print the startup banner with heavy AUTON text + robot."""
+    """Print the startup banner with massive AUTON text + robot."""
     con = console or Console()
     width = con.width or 80
 

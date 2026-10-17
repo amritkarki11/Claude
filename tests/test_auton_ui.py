@@ -38,7 +38,7 @@ class TestBanner:
         assert "Pentesting Agent" in output
 
     def test_banner_lines_not_empty(self):
-        assert len(_BANNER_LINES) == 8
+        assert len(_BANNER_LINES) == 9
 
     def test_row_colors_grey(self):
         assert "grey70" in _ROW_COLORS
