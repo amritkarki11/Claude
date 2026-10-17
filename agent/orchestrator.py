@@ -53,6 +53,7 @@ from .recipes.schema import Recipe
 from .recon.inventory import InventoryBuilder, ReconInventory
 from .recon.auth_bypass import AuthBypassDiscovery, BypassResult
 from .scanners.privesc import PrivilegeEscalationScanner
+from .mind.core import Mind
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ class _PassthroughVerifier(Verifier):
     This verifier simply maps scanner confidence to a Verdict:
       - high   → CONFIRMED
       - medium → NEEDS_HUMAN
-      - low    → FALSE_POSITIVE (scanner shouldn't emit these, but just in case)
+      - low    → FALSE (scanner shouldn't emit these, but just in case)
     """
 
     async def _verify(self, candidate: Candidate, replays: int = 1,
@@ -91,7 +92,7 @@ class _PassthroughVerifier(Verifier):
                 f"manual review recommended"
             )
         else:
-            verdict = Verdict.FALSE_POSITIVE
+            verdict = Verdict.FALSE
             reason = "Low confidence — likely false positive"
 
         return VerifyResult(
@@ -285,6 +286,12 @@ class OrchestratorConfig:
     rate_limit: float = 0.0
     stealth: bool = False
 
+    # Mind system
+    use_mind: bool = True
+    mind_data_dir: pathlib.Path | str | None = None
+    nvd_api_key: str | None = None
+    github_token: str | None = None
+
 
 class Orchestrator:
     """Main agent loop: recon → recipes → scan → verify → human queue.
@@ -304,6 +311,23 @@ class Orchestrator:
         self.retriever = Retriever()
         self._on_finding = on_finding  # real-time callback for confirmed findings
         self.on_recon_phase: Callable | None = None  # set by CLI for display
+
+        # Mind system — persona, memory, learning
+        self.mind: Mind | None = None
+        if config.use_mind:
+            try:
+                mind_kwargs: dict[str, Any] = {}
+                if config.mind_data_dir:
+                    mind_kwargs["data_dir"] = config.mind_data_dir
+                if config.nvd_api_key:
+                    mind_kwargs["nvd_api_key"] = config.nvd_api_key
+                if config.github_token:
+                    mind_kwargs["github_token"] = config.github_token
+                self.mind = Mind(**mind_kwargs)
+                logger.info("Mind system initialized")
+            except Exception as e:
+                logger.warning("Mind system failed to init: %s — running without it", e)
+                self.mind = None
 
         # Register built-in scanners
         self.registry.register("idor", IdorScanner)
@@ -365,6 +389,19 @@ class Orchestrator:
             logger.info("Step 1: Scope check for %s", target)
             scope_check(target)
 
+            # Step 1b: Mind — gather target intelligence
+            if self.mind:
+                try:
+                    tech_stack = list(self.config.tech_signals) if self.config.tech_signals else []
+                    intel = await self.mind.prepare_for_target(
+                        tech_stack=tech_stack, target_url=target,
+                    )
+                    logger.info("Mind intel: %d CVEs, %d exploits",
+                                len(intel.get("cves", [])),
+                                len(intel.get("exploits", [])))
+                except Exception as e:
+                    logger.warning("Mind prepare_for_target failed: %s", e)
+
             # Step 2: inventory (recon + manual)
             logger.info("Step 2: Building inventory")
             await self._build_inventory()
@@ -392,6 +429,25 @@ class Orchestrator:
                             len(test_plan.get("phases", {})))
             else:
                 self._test_plan = None
+
+            # Step 2c: Mind — prioritize endpoints
+            if self.mind and self.state.endpoints:
+                try:
+                    ep_dicts = [
+                        {"url": ep.url, "method": ep.method, "params": ep.params}
+                        for ep in self.state.endpoints
+                    ]
+                    prioritized = self.mind.prioritize_targets(
+                        ep_dicts, self.state.tech_signals,
+                    )
+                    url_order = {ep["url"]: i for i, ep in enumerate(prioritized)}
+                    self.state.endpoints.sort(
+                        key=lambda ep: url_order.get(ep.url, 999)
+                    )
+                    logger.info("Mind: reordered %d endpoints by attack priority",
+                                len(self.state.endpoints))
+                except Exception as e:
+                    logger.warning("Mind prioritize_targets failed: %s", e)
 
             # Step 3: retrieve recipes
             logger.info("Step 3: Retrieving matching recipes")
@@ -473,6 +529,19 @@ class Orchestrator:
             # Step 6: write human queue
             logger.info("Step 6: Writing human queue")
             self._write_human_queue()
+
+            # Step 7: Mind — record engagement summary for learning
+            if self.mind:
+                try:
+                    scanners_used = list({c.scanner for c in self.state.candidate_queue})
+                    self.mind.record_engagement_summary(
+                        target=target,
+                        findings_count=len(self.state.confirmed),
+                        tech_stack=self.state.tech_signals,
+                        scanners_used=scanners_used,
+                    )
+                except Exception as e:
+                    logger.warning("Mind record_engagement failed: %s", e)
 
             logger.info("Run complete: %s", self.state.summary())
             return self.state
@@ -974,12 +1043,24 @@ class Orchestrator:
                     self.state.confirmed.append(result)
                     if self._on_finding:
                         self._on_finding(result)
+                    if self.mind:
+                        self.mind.record_finding(
+                            candidate.scanner, success=True,
+                            tech_stack=",".join(self.state.tech_signals[:3]),
+                            details={"endpoint": candidate.endpoint,
+                                     "method": candidate.method},
+                        )
                 elif result.verdict == Verdict.NEEDS_HUMAN:
                     self.state.needs_human.append(result)
                     if self._on_finding:
                         self._on_finding(result)
                 else:
                     self.state.false_positives.append(result)
+                    if self.mind:
+                        self.mind.record_finding(
+                            candidate.scanner, success=False,
+                            tech_stack=",".join(self.state.tech_signals[:3]),
+                        )
 
             except Exception as exc:
                 logger.error("Verify error for %s: %s",

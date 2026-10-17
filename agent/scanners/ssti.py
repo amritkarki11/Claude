@@ -466,7 +466,13 @@ class SstiScanner(Scanner):
             return await self.client.request(
                 method, target, session=self.session, params=params,
             )
-        elif id_location in ("body", "json"):
+        elif id_location == "json":
+            data = dict(siblings) if siblings else {}
+            data[param] = value
+            return await self.client.post(
+                target, session=self.session, json=data,
+            )
+        elif id_location == "body":
             data = dict(siblings) if siblings else {}
             data[param] = value
             return await self.client.post(

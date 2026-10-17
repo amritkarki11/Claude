@@ -146,7 +146,7 @@ class SsrfScanner(Scanner):
                             method: str, id_location: str) -> dict | None:
         try:
             resp = await self._send(
-                target, param, "https://www.example.com", method, id_location
+                target, param, "benign_test_value_12345", method, id_location
             )
             return {
                 "status": resp.status_code,

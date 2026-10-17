@@ -9,7 +9,7 @@ For a future upgrade path: swap this for a local sentence-transformer
 """
 from __future__ import annotations
 
-import pickle
+import joblib
 from pathlib import Path
 from typing import Optional
 
@@ -108,14 +108,12 @@ class Embedder:
 
     def save(self, path: Path | str) -> None:
         """Persist the fitted vectorizer to disk."""
-        with open(path, "wb") as f:
-            pickle.dump(self.vectorizer, f)
+        joblib.dump(self.vectorizer, path)
 
     @classmethod
     def load(cls, path: Path | str) -> "Embedder":
         """Load a previously saved embedder."""
-        with open(path, "rb") as f:
-            vectorizer = pickle.load(f)
+        vectorizer = joblib.load(path)
         obj = cls.__new__(cls)
         obj.vectorizer = vectorizer
         obj._fitted = True

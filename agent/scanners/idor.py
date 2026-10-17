@@ -117,6 +117,11 @@ class IdorScanner(Scanner):
         # Success indicators: 2xx status, or response body suggests action taken
         if 200 <= resp.status_code < 300:
             body = resp.text[:500]
+            body_lower = body.lower()
+            error_indicators = ["error", "denied", "forbidden", "unauthorized",
+                                "not found", "invalid", "no permission", "access denied"]
+            if any(ind in body_lower for ind in error_indicators):
+                return None
             return {
                 "status": resp.status_code,
                 "body_snippet": body,

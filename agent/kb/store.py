@@ -10,7 +10,6 @@ same search() interface.
 from __future__ import annotations
 
 import json
-import pickle
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -128,8 +127,8 @@ class VectorStore:
         np.save(directory / "vectors.npy", self.vectors)
         with open(directory / "meta.json", "w", encoding="utf-8") as f:
             json.dump({"recipe_ids": self.recipe_ids}, f)
-        with open(directory / "texts.pkl", "wb") as f:
-            pickle.dump(self._texts, f)
+        with open(directory / "texts.json", "w", encoding="utf-8") as f:
+            json.dump(self._texts, f)
 
     @classmethod
     def load(cls, directory: Path | str) -> "VectorStore":
@@ -139,8 +138,8 @@ class VectorStore:
         vectors = np.load(directory / "vectors.npy")
         with open(directory / "meta.json", "r", encoding="utf-8") as f:
             meta = json.load(f)
-        with open(directory / "texts.pkl", "rb") as f:
-            texts = pickle.load(f)
+        with open(directory / "texts.json", "r", encoding="utf-8") as f:
+            texts = json.load(f)
         store = cls(embedder=embedder, vectors=vectors,
                     recipe_ids=meta["recipe_ids"], _texts=texts)
         return store

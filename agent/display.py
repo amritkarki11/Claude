@@ -388,7 +388,7 @@ def display_recon_summary(inventory) -> None:
 
 # ── Confirmed finding display ────────────────────────────────
 
-_finding_counter = 0
+_finding_counter = __import__("itertools").count(1)
 
 
 def display_confirmed_finding(result) -> None:
@@ -396,9 +396,7 @@ def display_confirmed_finding(result) -> None:
 
     ONLY shows CONFIRMED findings, not every HTTP call the backend makes.
     """
-    global _finding_counter
-    _finding_counter += 1
-    count = _finding_counter
+    count = next(_finding_counter)
 
     candidate = result.candidate
     vuln_class = candidate.scanner.replace("Scanner", "").replace("Discovery", "")

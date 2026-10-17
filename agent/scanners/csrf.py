@@ -133,7 +133,7 @@ class CsrfScanner(Scanner):
 
             # Check SameSite cookie attribute
             samesite = "none"
-            for cookie_header in page_resp.headers.get_list("set-cookie") if hasattr(page_resp.headers, "get_list") else [page_resp.headers.get("set-cookie", "")]:
+            for cookie_header in [v for k, v in page_resp.headers.multi_items() if k.lower() == "set-cookie"]:
                 match = _SAMESITE_RE.search(cookie_header)
                 if match:
                     samesite = match.group(1).lower()

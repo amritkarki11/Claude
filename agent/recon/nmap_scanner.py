@@ -80,11 +80,15 @@ class NmapScanner:
         # Build command with XML output for parsing
         # --host-timeout keeps nmap itself from hanging on slow hosts
         host_timeout = max(self.timeout - 30, 60)
-        cmd = f"nmap {self.scan_type} -p {self.ports} --host-timeout {host_timeout}s -oX - --open {self.target}"
+        cmd_args = [
+            "nmap", self.scan_type, "-p", self.ports,
+            "--host-timeout", f"{host_timeout}s",
+            "-oX", "-", "--open", self.target,
+        ]
 
         try:
-            proc = await asyncio.create_subprocess_shell(
-                cmd,
+            proc = await asyncio.create_subprocess_exec(
+                *cmd_args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

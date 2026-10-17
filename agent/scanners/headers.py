@@ -280,9 +280,7 @@ class HeaderScanner(Scanner):
             ))
 
         # ── 9. Set-Cookie flags ──
-        cookies = resp.headers.get_list("set-cookie") if hasattr(resp.headers, 'get_list') else [
-            v for k, v in resp.headers.multi_items() if k.lower() == "set-cookie"
-        ] if hasattr(resp.headers, 'multi_items') else []
+        cookies = [v for k, v in resp.headers.multi_items() if k.lower() == "set-cookie"]
         # Fallback: try raw
         if not cookies:
             cookies = [v for k, v in resp.headers.items() if k.lower() == "set-cookie"]

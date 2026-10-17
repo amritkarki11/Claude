@@ -13,6 +13,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -122,6 +124,7 @@ class TerminalManager:
                           cwd: str | None) -> TerminalSession:
         """Spawn a new tmux window/pane."""
         tmux_session = "pentest-agent"
+        safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", session.name)
 
         # Check if our tmux session exists
         check = subprocess.run(
@@ -132,33 +135,50 @@ class TerminalManager:
             # Create new tmux session (detached)
             subprocess.run(
                 ["tmux", "new-session", "-d", "-s", tmux_session,
-                 "-n", session.name],
+                 "-n", safe_name],
                 check=True,
             )
-            # Send command to the initial window
+            # Send command to the initial window (literal mode)
             subprocess.run(
-                ["tmux", "send-keys", "-t", f"{tmux_session}:{session.name}",
-                 session.command, "Enter"],
+                ["tmux", "send-keys", "-t", f"{tmux_session}:{safe_name}",
+                 "-l", session.command],
+                check=True,
+            )
+            subprocess.run(
+                ["tmux", "send-keys", "-t", f"{tmux_session}:{safe_name}",
+                 "Enter"],
                 check=True,
             )
         else:
             # Create new window in existing session
             subprocess.run(
                 ["tmux", "new-window", "-t", tmux_session,
-                 "-n", session.name],
+                 "-n", safe_name],
                 check=True,
             )
             if cwd:
                 subprocess.run(
                     ["tmux", "send-keys", "-t",
-                     f"{tmux_session}:{session.name}",
-                     f"cd {cwd}", "Enter"],
+                     f"{tmux_session}:{safe_name}",
+                     "-l", f"cd {shlex.quote(cwd)}"],
+                    check=True,
+                )
+                subprocess.run(
+                    ["tmux", "send-keys", "-t",
+                     f"{tmux_session}:{safe_name}",
+                     "Enter"],
                     check=True,
                 )
             subprocess.run(
                 ["tmux", "send-keys", "-t",
-                 f"{tmux_session}:{session.name}",
-                 session.command, "Enter"],
+                 f"{tmux_session}:{safe_name}",
+                 "-l", session.command],
+                check=True,
+            )
+            subprocess.run(
+                ["tmux", "send-keys", "-t",
+                 f"{tmux_session}:{safe_name}",
+                 "Enter"],
                 check=True,
             )
 
