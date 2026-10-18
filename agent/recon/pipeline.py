@@ -21,6 +21,7 @@ from .dns_recon import dns_records
 from .fingerprint import Fingerprinter
 from .port_scan import scan_ports
 from .js_extractor import extract_endpoints
+from .param_discovery import discover_params
 from .secret_scanner import scan_files
 from .sourcemap_detector import detect_sourcemaps
 from .wayback import run_archive_recon
@@ -138,6 +139,16 @@ async def run_recon(
 
     sourcemaps = await detect_sourcemaps(client, seed_url, js_urls, session=session)
 
+    # Parameter discovery: mine from HTML/JS + fuzz top endpoints
+    page_bodies = {u: b for u, b in bodies.items() if u not in set(js_urls)}
+    js_bodies = {u: b for u, b in bodies.items() if u in set(js_urls)}
+    try:
+        param_discovery = await discover_params(
+            client, page_bodies, js_bodies, endpoints, seed_url, session=session,
+        )
+    except Exception:
+        param_discovery = {"mined_params": [], "fuzzed_params": [], "reflected_params": [], "total_new": 0, "by_source": {}}
+
     secrets = scan_files(bodies)  # final step: offline scan of every fetched body
 
     dns = {}
@@ -159,6 +170,7 @@ async def run_recon(
         "skipped_js": skipped_js,
         "endpoints": endpoints,
         "sourcemaps": sourcemaps,
+        "param_discovery": param_discovery,
         "secrets": secrets,
         "fingerprint": fingerprint,
         "dns": dns,
@@ -174,6 +186,8 @@ async def run_recon(
             "params": sum(len(e["params"]) for e in endpoints),
             "sourcemaps": len(sourcemaps),
             "sources_exposed": sum(m["source_count"] for m in sourcemaps),
+            "hidden_params": param_discovery.get("total_new", 0),
+            "reflected_params": len(param_discovery.get("reflected_params", [])),
             "tech_signals": fingerprint.get("signal_count", 0),
             "archive_urls": sum(
                 v["summary"]["js_urls"] + v["summary"]["endpoints"] + v["summary"]["other"]
@@ -200,6 +214,7 @@ def format_summary(report: dict, path: pathlib.Path) -> str:
         f"[recon] {report['host']}: {s['pages']} pages, {s['forms']} forms, "
         f"{s['js_files']} JS files, {s['endpoints']} endpoints ({s['params']} params), "
         f"{s['sourcemaps']} exposed source maps ({s['sources_exposed']} sources), "
+        f"{s.get('hidden_params', 0)} hidden params, "
         f"{s['secrets']} potential secrets"
     )
     if report.get("archive"):

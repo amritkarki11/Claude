@@ -227,6 +227,30 @@ def _build_scan_targets(report: dict) -> list[dict]:
             "id_location": "query", "siblings": {},
         })
 
+    # Add fuzzed params from param discovery (reflected params are high-value)
+    pd = report.get("param_discovery", {})
+    for fuzzed in pd.get("fuzzed_params", []):
+        ep_url = fuzzed.get("endpoint", "")
+        pname = fuzzed.get("name", "")
+        if not ep_url or not pname:
+            continue
+        # Find existing target for this endpoint and add the param
+        matched = False
+        for t in targets:
+            if t["url"] == ep_url:
+                if pname not in t["params"]:
+                    t["params"].append(pname)
+                matched = True
+                break
+        if not matched:
+            key = f"GET:{ep_url}:{pname}"
+            if key not in seen:
+                seen.add(key)
+                targets.append({
+                    "url": ep_url, "params": [pname], "method": "GET",
+                    "id_location": "query", "siblings": {},
+                })
+
     return targets
 
 

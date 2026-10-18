@@ -1,3 +1,3 @@
-from .login import auto_login
+from .login import auto_login, check_session, reauth
 
-__all__ = ["auto_login"]
+__all__ = ["auto_login", "check_session", "reauth"]

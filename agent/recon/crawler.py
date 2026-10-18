@@ -796,12 +796,35 @@ async def crawl(
     session: Session | None = None,
     bodies: dict[str, str] | None = None,
 ) -> dict:
-    """Bridge function: wraps the Crawler class and returns the dict format
-    expected by agent.recon.pipeline.run_recon().
+    """Bridge function: tries BrowserCrawler (Playwright) first, falls back
+    to the static Crawler if Playwright is unavailable.
 
     Returns:
-        {"pages_crawled": [...urls], "forms": [...], "script_urls": [...]}
+        {"pages_crawled": [...urls], "forms": [...], "script_urls": [...], "errors": [...]}
     """
+    # Try Playwright-first browser crawler
+    try:
+        from .browser_crawler import BrowserCrawler
+        logger.info("Using BrowserCrawler (Playwright) for %s", seed_url)
+        bc = BrowserCrawler(
+            client, session,
+            base_url=seed_url,
+            max_depth=max_depth,
+            max_pages=max_pages,
+        )
+        result = await bc.crawl()
+        if bodies is not None:
+            bodies.update(result.pop("bodies", {}))
+        result.pop("intercepted_apis", None)
+        if result.get("pages_crawled"):
+            return result
+        logger.info("BrowserCrawler returned 0 pages, falling back to static")
+    except ImportError:
+        logger.info("Playwright not available, using static Crawler")
+    except Exception as exc:
+        logger.info("BrowserCrawler failed (%s), falling back to static", exc)
+
+    # Fallback: static httpx-based crawler
     crawler = Crawler(
         client, session,
         base_url=seed_url,

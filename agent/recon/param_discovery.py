@@ -462,3 +462,355 @@ def infer_param_type(name: str) -> str:
         if pattern.search(name):
             return ptype
     return "unknown"
+
+
+# ── Common parameter wordlist for fuzzing ────────────────────
+
+_COMMON_PARAMS = [
+    "id", "user_id", "uid", "account_id", "page", "limit", "offset",
+    "q", "query", "search", "filter", "sort", "order", "dir",
+    "name", "username", "email", "password", "token", "key", "api_key",
+    "file", "path", "url", "redirect", "next", "callback", "return_url",
+    "action", "type", "category", "status", "role", "admin", "debug",
+    "format", "output", "lang", "locale", "version", "v",
+    "from", "to", "start", "end", "date", "timestamp",
+    "size", "width", "height", "count", "num", "max", "min",
+    "include", "exclude", "fields", "expand", "select",
+    "page_size", "per_page", "cursor", "after", "before",
+    "template", "view", "render", "layout", "theme",
+    "cmd", "command", "exec", "code", "input", "data", "payload",
+    "source", "target", "host", "port", "ip", "domain",
+    "comment", "body", "content", "message", "text", "title", "description",
+    "csrf_token", "_token", "nonce", "state", "session_id",
+    "price", "amount", "qty", "quantity", "discount", "coupon",
+    "is_admin", "is_active", "verified", "approved", "deleted",
+    "ref", "referrer", "origin", "site", "channel",
+]
+
+# Patterns to extract params from HTML comments and JS
+_HTML_COMMENT_PARAM = re.compile(
+    r"<!--[^>]*?"
+    r"(?:name|param|field|input|var|variable)\s*[=:]\s*[\"']?(\w+)",
+    re.IGNORECASE,
+)
+_JS_SEARCHPARAMS = re.compile(
+    r"""\.(?:get|set|append|has|delete)\(\s*["'`](\w+)["'`]""",
+)
+_JS_FETCH_BODY = re.compile(
+    r"""["'`](\w+)["'`]\s*:\s*(?:["'`]|[\w.]+)""",
+)
+_JS_QUERY_BUILD = re.compile(
+    r"""[?&](\w+)=""",
+)
+_DATA_ATTR = re.compile(
+    r"""data-([\w-]+)\s*=\s*["']""",
+)
+_FORM_INPUT_NAME = re.compile(
+    r"""<input[^>]+name\s*=\s*["'](\w+)["']""",
+    re.IGNORECASE,
+)
+_HIDDEN_INPUT = re.compile(
+    r"""<input[^>]+type\s*=\s*["']hidden["'][^>]+name\s*=\s*["'](\w+)["']"""
+    r"""|<input[^>]+name\s*=\s*["'](\w+)["'][^>]+type\s*=\s*["']hidden["']""",
+    re.IGNORECASE,
+)
+_SELECT_NAME = re.compile(
+    r"""<select[^>]+name\s*=\s*["'](\w+)["']""",
+    re.IGNORECASE,
+)
+_TEXTAREA_NAME = re.compile(
+    r"""<textarea[^>]+name\s*=\s*["'](\w+)["']""",
+    re.IGNORECASE,
+)
+
+# Canary for reflection detection
+_REFLECT_CANARY = "autn7x3k9"
+
+
+# ── Active Discovery ─────────────────────────────────────────
+
+
+def mine_params_from_html(html: str) -> set[str]:
+    """Extract parameter names from HTML source (comments, hidden inputs, forms)."""
+    found: set[str] = set()
+
+    for m in _HTML_COMMENT_PARAM.finditer(html):
+        found.add(m.group(1))
+
+    for m in _HIDDEN_INPUT.finditer(html):
+        name = m.group(1) or m.group(2)
+        if name:
+            found.add(name)
+
+    for m in _FORM_INPUT_NAME.finditer(html):
+        found.add(m.group(1))
+
+    for m in _SELECT_NAME.finditer(html):
+        found.add(m.group(1))
+
+    for m in _TEXTAREA_NAME.finditer(html):
+        found.add(m.group(1))
+
+    for m in _DATA_ATTR.finditer(html):
+        attr = m.group(1).replace("-", "_")
+        if len(attr) > 2 and not attr.startswith(("v_", "bs_", "toggle", "dismiss")):
+            found.add(attr)
+
+    return found
+
+
+def mine_params_from_js(js_text: str) -> set[str]:
+    """Extract parameter names from JavaScript source."""
+    found: set[str] = set()
+
+    for m in _JS_SEARCHPARAMS.finditer(js_text):
+        found.add(m.group(1))
+
+    for m in _JS_QUERY_BUILD.finditer(js_text):
+        found.add(m.group(1))
+
+    json_blocks = re.finditer(
+        r"""(?:fetch|axios|post|put|patch|request)\s*\([^)]*\{([^}]{5,500})\}""",
+        js_text,
+        re.IGNORECASE,
+    )
+    for block in json_blocks:
+        for m in _JS_FETCH_BODY.finditer(block.group(1)):
+            name = m.group(1)
+            if len(name) > 1 and name not in ("method", "headers", "body", "mode",
+                                                "credentials", "cache", "redirect",
+                                                "referrer", "integrity", "signal",
+                                                "Content", "Accept", "Authorization"):
+                found.add(name)
+
+    return found
+
+
+async def fuzz_params(
+    client: "HttpClient",
+    url: str,
+    *,
+    method: str = "GET",
+    wordlist: list[str] | None = None,
+    session: "Session | None" = None,
+    max_params: int = 80,
+) -> list[dict]:
+    """Probe an endpoint with common param names, detect accepted params by response diff.
+
+    Returns list of dicts: {"name": str, "reflected": bool, "evidence": str}.
+    """
+    from ..scope import in_scope, ScopeError
+
+    if not in_scope(url):
+        return []
+
+    params = (wordlist or _COMMON_PARAMS)[:max_params]
+
+    # Get baseline response
+    try:
+        if method == "GET":
+            baseline = await client.get(url, session=session)
+        else:
+            baseline = await client.post(url, data={}, session=session)
+        baseline.raise_for_status()
+    except (ScopeError, Exception):
+        return []
+
+    base_len = len(baseline.text)
+    base_status = baseline.status_code
+    base_headers = set(baseline.headers.keys())
+
+    discovered: list[dict] = []
+
+    # Batch params to reduce requests: send 5 at a time
+    batch_size = 5
+    for i in range(0, len(params), batch_size):
+        batch = params[i:i + batch_size]
+        query = {p: _REFLECT_CANARY for p in batch}
+
+        try:
+            if method == "GET":
+                sep = "&" if "?" in url else "?"
+                from urllib.parse import urlencode
+                test_url = f"{url}{sep}{urlencode(query)}"
+                resp = await client.get(test_url, session=session)
+            else:
+                resp = await client.post(url, data=query, session=session)
+        except (ScopeError, Exception):
+            continue
+
+        resp_text = resp.text
+        resp_len = len(resp_text)
+        resp_status = resp.status_code
+
+        # Skip if server rejected (4xx/5xx that differs from baseline)
+        if resp_status >= 400 and base_status < 400:
+            continue
+
+        # Detect which params in this batch caused a difference
+        if resp_status == base_status and abs(resp_len - base_len) < 20:
+            # No meaningful difference with batch — check reflection only
+            if _REFLECT_CANARY in resp_text:
+                # At least one param reflected; test individually
+                for p in batch:
+                    await _test_single_param(
+                        client, url, p, method, session,
+                        base_len, base_status, discovered,
+                    )
+            continue
+
+        # Batch caused a difference — test each param individually
+        for p in batch:
+            await _test_single_param(
+                client, url, p, method, session,
+                base_len, base_status, discovered,
+            )
+
+    return discovered
+
+
+async def _test_single_param(
+    client: "HttpClient",
+    url: str,
+    param: str,
+    method: str,
+    session: "Session | None",
+    base_len: int,
+    base_status: int,
+    results: list[dict],
+) -> None:
+    """Test a single parameter and append to results if it's accepted."""
+    from ..scope import ScopeError
+
+    try:
+        if method == "GET":
+            from urllib.parse import urlencode
+            sep = "&" if "?" in url else "?"
+            test_url = f"{url}{sep}{urlencode({param: _REFLECT_CANARY})}"
+            resp = await client.get(test_url, session=session)
+        else:
+            resp = await client.post(url, data={param: _REFLECT_CANARY}, session=session)
+    except (ScopeError, Exception):
+        return
+
+    resp_text = resp.text
+    reflected = _REFLECT_CANARY in resp_text
+    len_diff = abs(len(resp_text) - base_len)
+    status_diff = resp.status_code != base_status
+
+    evidence_parts: list[str] = []
+    if reflected:
+        evidence_parts.append("value reflected in response")
+    if status_diff:
+        evidence_parts.append(f"status changed: {base_status} -> {resp.status_code}")
+    if len_diff > 50:
+        evidence_parts.append(f"response size changed by {len_diff} bytes")
+
+    if reflected or status_diff or len_diff > 50:
+        results.append({
+            "name": param,
+            "reflected": reflected,
+            "evidence": "; ".join(evidence_parts) if evidence_parts else "response diff",
+        })
+
+
+async def discover_params(
+    client: "HttpClient",
+    pages_bodies: dict[str, str],
+    js_bodies: dict[str, str],
+    endpoints: list[dict],
+    seed_url: str,
+    *,
+    session: "Session | None" = None,
+    max_fuzz_endpoints: int = 5,
+) -> dict:
+    """Run full parameter discovery: mine from sources + fuzz top endpoints.
+
+    Args:
+        client: Scope-gated HTTP client.
+        pages_bodies: {url: html_body} from the crawler.
+        js_bodies: {url: js_source} from JS fetching.
+        endpoints: Endpoint dicts from JS extraction.
+        seed_url: The original target URL.
+        session: Auth session if available.
+        max_fuzz_endpoints: How many endpoints to actively fuzz.
+
+    Returns dict with keys: mined_params, fuzzed_params, total_new, by_source.
+    """
+    from ..scope import in_scope
+    from urllib.parse import urljoin
+
+    mined: dict[str, set[str]] = {}  # source_type -> param names
+
+    # 1. Mine from HTML pages
+    html_params: set[str] = set()
+    for url, body in pages_bodies.items():
+        if body and ("<" in body):
+            html_params |= mine_params_from_html(body)
+    if html_params:
+        mined["html"] = html_params
+
+    # 2. Mine from JS sources
+    js_params: set[str] = set()
+    for url, body in js_bodies.items():
+        if body:
+            js_params |= mine_params_from_js(body)
+    if js_params:
+        mined["js"] = js_params
+
+    # 3. Collect already-known params
+    known_params: set[str] = set()
+    for ep in endpoints:
+        known_params.update(ep.get("params", []))
+
+    all_mined = set()
+    for s in mined.values():
+        all_mined |= s
+    new_params = all_mined - known_params
+
+    # 4. Fuzz top endpoints for hidden params
+    fuzz_targets: list[str] = []
+    # Prefer endpoints that already have params (more likely to accept more)
+    for ep in sorted(endpoints, key=lambda e: len(e.get("params", [])), reverse=True):
+        path = ep.get("path", "")
+        if path:
+            full_url = urljoin(seed_url, path)
+            if in_scope(full_url) and full_url not in fuzz_targets:
+                fuzz_targets.append(full_url)
+        if len(fuzz_targets) >= max_fuzz_endpoints:
+            break
+
+    # Also fuzz the seed URL itself
+    if in_scope(seed_url) and seed_url not in fuzz_targets:
+        fuzz_targets.insert(0, seed_url)
+
+    fuzzed: list[dict] = []
+    fuzz_wordlist = list(new_params)[:40] + _COMMON_PARAMS[:40]
+    # Deduplicate preserving order
+    seen_words: set[str] = set()
+    deduped: list[str] = []
+    for w in fuzz_wordlist:
+        if w not in seen_words:
+            seen_words.add(w)
+            deduped.append(w)
+    fuzz_wordlist = deduped
+
+    for target_url in fuzz_targets[:max_fuzz_endpoints]:
+        results = await fuzz_params(
+            client, target_url,
+            wordlist=fuzz_wordlist,
+            session=session,
+        )
+        for r in results:
+            r["endpoint"] = target_url
+        fuzzed.extend(results)
+
+    fuzzed_names = {r["name"] for r in fuzzed}
+
+    return {
+        "mined_params": sorted(new_params),
+        "fuzzed_params": fuzzed,
+        "reflected_params": [r for r in fuzzed if r.get("reflected")],
+        "total_new": len(new_params | fuzzed_names),
+        "by_source": {k: sorted(v) for k, v in mined.items()},
+    }

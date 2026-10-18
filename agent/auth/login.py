@@ -1,17 +1,20 @@
-"""Auto-login — detect a login form, submit credentials, capture the session.
+"""Auto-login — detect a login form OR JSON API, submit credentials, capture the session.
 
 Flow:
   1. Fetch the target URL (or common login paths) looking for a form with
-     a password field.
+     a password field, or a JSON login API endpoint.
   2. Fill username into the first text/email field, password into the
-     password field, submit via POST to the form's action URL.
-  3. Capture Set-Cookie headers from the response and build a Session
-     carrying those cookies for all subsequent requests.
+     password field, submit via POST to the form's action URL or JSON API.
+  3. Capture Set-Cookie headers and/or JWT tokens from the response and
+     build a Session carrying those for all subsequent requests.
+  4. Store credentials in the Session for automatic re-authentication
+     when the session expires.
 
 All requests go through scope.check() via HttpClient.
 """
 from __future__ import annotations
 
+import json as _json
 import re
 from html.parser import HTMLParser
 from urllib.parse import urljoin
@@ -23,6 +26,20 @@ _LOGIN_PATHS = [
     "/login", "/signin", "/sign-in", "/auth/login", "/account/login",
     "/user/login", "/admin/login", "/wp-login.php", "/users/sign_in",
     "/session/new", "/log-in",
+]
+
+_JSON_LOGIN_PATHS = [
+    "/api/login", "/api/auth/login", "/api/v1/login", "/api/v1/auth/login",
+    "/api/v2/login", "/api/v2/auth/login", "/auth/signin", "/api/signin",
+    "/api/token", "/api/v1/token", "/oauth/token",
+]
+
+_TOKEN_KEYS = ("token", "access_token", "accessToken", "jwt", "id_token", "auth_token")
+
+_FAIL_SIGNALS = [
+    "invalid password", "incorrect password", "login failed",
+    "authentication failed", "invalid credentials", "wrong password",
+    "bad credentials", "account not found", "invalid username",
 ]
 
 _USERNAME_PATTERNS = re.compile(
@@ -152,7 +169,13 @@ async def auto_login(
 
     page_url, form = await _discover_login_page(client, target_url)
     if not form:
-        _log("  [yellow]No login form detected on target or common paths.[/yellow]")
+        _log("  [dim]No HTML login form found — trying JSON API endpoints...[/dim]")
+        json_session = await _try_json_login(
+            client, target_url, username, password, console=console,
+        )
+        if json_session:
+            return json_session
+        _log("  [yellow]No login form or JSON API detected on target.[/yellow]")
         return None
 
     _log(f"  [green]+[/green] Login form found at [white]{page_url}[/white]")
@@ -209,16 +232,13 @@ async def auto_login(
 
     # Check for obvious login failure signals
     body_lower = resp.text[:2000].lower()
-    fail_signals = [
-        "invalid password", "incorrect password", "login failed",
-        "authentication failed", "invalid credentials", "wrong password",
-        "bad credentials", "account not found", "invalid username",
-    ]
-    if any(sig in body_lower for sig in fail_signals):
+    if any(sig in body_lower for sig in _FAIL_SIGNALS):
         _log("  [red]Login appears to have failed (server returned an error message).[/red]")
         return None
 
     session = Session(cookies=cookies)
+    session._credentials = {"username": username, "password": password}
+    session._login_url = target_url
     cookie_names = ", ".join(cookies.keys())
     _log(
         f"  [bold green]* Login successful![/bold green] "
@@ -227,3 +247,110 @@ async def auto_login(
     _log(f"  [dim]  All subsequent requests will use this authenticated session.[/dim]")
 
     return session
+
+
+async def _try_json_login(
+    client: HttpClient,
+    target_url: str,
+    username: str,
+    password: str,
+    *,
+    console=None,
+) -> Session | None:
+    """Try JSON API login endpoints. Returns authenticated Session or None."""
+    def _log(msg: str) -> None:
+        if console:
+            console.print(msg)
+
+    base = target_url.rstrip("/")
+    for path in _JSON_LOGIN_PATHS:
+        url = base + path
+        try:
+            scope_check(url)
+        except Exception:
+            continue
+
+        for payload in [
+            {"username": username, "password": password},
+            {"email": username, "password": password},
+        ]:
+            try:
+                resp = await client.request(
+                    "POST", url,
+                    content=_json.dumps(payload).encode(),
+                    headers={"Content-Type": "application/json", "Accept": "application/json"},
+                )
+                if resp.status_code >= 400:
+                    continue
+
+                try:
+                    body = resp.json()
+                except Exception:
+                    continue
+
+                if not isinstance(body, dict):
+                    continue
+
+                # Look for a token in the response
+                token = None
+                for key in _TOKEN_KEYS:
+                    if key in body:
+                        token = body[key]
+                        break
+                    # Check nested: {"data": {"token": "..."}}
+                    if isinstance(body.get("data"), dict) and key in body["data"]:
+                        token = body["data"][key]
+                        break
+
+                if token and isinstance(token, str):
+                    _log(f"  [green]+[/green] JSON login succeeded at [white]{url}[/white]")
+                    session = Session(bearer=token)
+                    session._credentials = {"username": username, "password": password}
+                    session._login_url = target_url
+
+                    # Also capture any cookies
+                    for hist_resp in resp.history:
+                        for cookie in hist_resp.cookies.jar:
+                            session.cookies[cookie.name] = cookie.value
+                    for cookie in resp.cookies.jar:
+                        session.cookies[cookie.name] = cookie.value
+
+                    session.refresh_timestamp()
+                    return session
+            except Exception:
+                continue
+
+    return None
+
+
+async def check_session(client: HttpClient, session: Session, check_url: str) -> bool:
+    """Return True if the session still works (gets a non-401/403 response)."""
+    try:
+        resp = await client.get(check_url, session=session)
+        return resp.status_code not in (401, 403)
+    except Exception:
+        return False
+
+
+async def reauth(client: HttpClient, session: Session, *, console=None) -> Session | None:
+    """Re-authenticate using stored credentials. Returns a refreshed Session or None."""
+    creds = session._credentials
+    if not creds or not creds.get("username") or not creds.get("password"):
+        return None
+
+    target = session._login_url
+    if not target:
+        return None
+
+    if console:
+        console.print("  [yellow]Session expired — re-authenticating...[/yellow]")
+
+    # Try form login first, then JSON
+    new_session = await auto_login(
+        client, target, creds["username"], creds["password"], console=console,
+    )
+    if not new_session:
+        new_session = await _try_json_login(
+            client, target, creds["username"], creds["password"], console=console,
+        )
+    return new_session

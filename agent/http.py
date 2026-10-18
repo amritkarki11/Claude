@@ -34,13 +34,38 @@ class Session:
     """Holds auth material for one logical identity (attacker/victim account,
     etc). Applied to every request made with it. Multiple schemes can be
     combined (e.g. Bearer + a custom header); `bearer` and `jwt` both set the
-    Authorization header and the later one wins if both are given."""
+    Authorization header and the later one wins if both are given.
+
+    Tracks session validity: `created_at` records when the session was
+    established, `max_age` (seconds) sets the expiry window, and
+    `_credentials` stores the login info for automatic re-authentication.
+    """
 
     jwt: str | None = None
     bearer: str | None = None
     jsessionid: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
     cookies: dict[str, str] = field(default_factory=dict)
+    created_at: float = field(default_factory=time.monotonic)
+    max_age: float = 1800.0  # 30 min default
+    _credentials: dict[str, str] = field(default_factory=dict, repr=False)
+    _login_url: str = field(default="", repr=False)
+
+    @property
+    def is_valid(self) -> bool:
+        """True if the session has auth material and hasn't expired."""
+        has_auth = bool(self.jwt or self.bearer or self.jsessionid or self.cookies)
+        if not has_auth:
+            return False
+        return (time.monotonic() - self.created_at) < self.max_age
+
+    @property
+    def is_expired(self) -> bool:
+        return (time.monotonic() - self.created_at) >= self.max_age
+
+    def refresh_timestamp(self) -> None:
+        """Reset the creation time (call after a successful re-auth)."""
+        self.created_at = time.monotonic()
 
     def apply(self, headers: dict[str, str], cookies: dict[str, str]) -> None:
         if self.jwt:

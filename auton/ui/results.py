@@ -37,6 +37,9 @@ def print_recon_summary(report: dict, report_path: str, console: Console) -> Non
     tbl.add_row("JS analyzed:", str(s.get("js_files", 0)))
     tbl.add_row("Secrets:", str(s.get("secrets", 0)))
     tbl.add_row("Source maps:", str(s.get("sourcemaps", 0)))
+    tbl.add_row("Hidden params:", str(s.get("hidden_params", 0)))
+    if s.get("reflected_params", 0):
+        tbl.add_row("Reflected:", str(s.get("reflected_params", 0)))
     tbl.add_row("Report:", str(report_path))
 
     # Show crawl errors if pages = 0
