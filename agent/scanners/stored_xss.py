@@ -112,10 +112,12 @@ class StoredXssScanner(Scanner):
                             "param": param,
                             "payload": result["payload"],
                             "method": meth,
+                            "full_request": result.get("full_request", ""),
                         },
                         response_data={
                             "render_url": result.get("render_url"),
                             "stored": result.get("stored", False),
+                            "full_response": result.get("full_response", ""),
                         },
                     ))
         else:
@@ -133,10 +135,12 @@ class StoredXssScanner(Scanner):
                             "param": param,
                             "payload": result["payload"],
                             "method": method,
+                            "full_request": result.get("full_request", ""),
                         },
                         response_data={
                             "render_url": result.get("render_url"),
                             "stored": result.get("stored", False),
+                            "full_response": result.get("full_response", ""),
                         },
                     ))
 
@@ -241,6 +245,8 @@ class StoredXssScanner(Scanner):
                             f"via parameter '{param}' is rendered unencoded at "
                             f"'{found_render_url}'."
                         ),
+                        "full_request": self.capture_request(store_resp),
+                        "full_response": self.capture_response(render_resp),
                     }
             except Exception:
                 continue
@@ -257,6 +263,8 @@ class StoredXssScanner(Scanner):
                 f"User input is stored and rendered at '{found_render_url}', "
                 "but XSS payloads appear to be encoded. Manual review recommended."
             ),
+            "full_request": self.capture_request(store_resp),
+            "full_response": "",
         }
 
     # ── helpers ──────────────────────────────────────────────

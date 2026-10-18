@@ -92,12 +92,17 @@ class SsrfScanner(Scanner):
                                 confidence=result.get("confidence", "medium"),
                                 request_data={
                                     "param": param,
+                                    "payload": ssrf_url,
                                     "ssrf_url": ssrf_url,
                                     "id_location": id_location,
+                                    "sibling_fields": siblings,
+                                    "full_request": result.get("full_request", ""),
                                 },
                                 response_data={
                                     "status": result.get("status"),
                                     "signature_match": result.get("signature_match"),
+                                    "body_snippet": result.get("body_snippet", ""),
+                                    "full_response": result.get("full_response", ""),
                                 },
                             )
                         )
@@ -127,6 +132,8 @@ class SsrfScanner(Scanner):
                     "signature_match": sig,
                     "body_snippet": resp.text[:500],
                     "confidence": "high" if "metadata" in ssrf_url else "medium",
+                    "full_request": self.capture_request(resp),
+                    "full_response": self.capture_response(resp),
                 }
 
         # Check for significant response difference from baseline
@@ -142,6 +149,8 @@ class SsrfScanner(Scanner):
                     "probe_length": resp_len,
                     "body_snippet": resp.text[:500],
                     "confidence": "low",
+                    "full_request": self.capture_request(resp),
+                    "full_response": self.capture_response(resp),
                 }
 
         return None

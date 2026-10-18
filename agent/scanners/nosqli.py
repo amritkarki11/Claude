@@ -234,11 +234,13 @@ class NosqliScanner(Scanner):
                 "id_location": id_location,
                 "technique": technique,
                 "sibling_fields": siblings or {},
+                "full_request": operator_result.get("full_request") or tautology_result.get("full_request", ""),
             },
             response_data={
                 "status": operator_result.get("status") or tautology_result.get("true_status"),
                 "baseline_status": baseline_status,
                 "baseline_length": baseline_len,
+                "full_response": operator_result.get("full_response") or tautology_result.get("full_response", ""),
             },
         )
 
@@ -294,6 +296,8 @@ class NosqliScanner(Scanner):
                             "error_match": sig,
                             "body_snippet": resp.text[:500],
                             "type": "error-based",
+                            "full_request": self.capture_request(resp),
+                            "full_response": self.capture_response(resp),
                         }
 
                 # Check for significant response difference (data leak / bypass)
@@ -307,6 +311,8 @@ class NosqliScanner(Scanner):
                         "status": status,
                         "type": "auth-bypass",
                         "body_snippet": resp.text[:500],
+                        "full_request": self.capture_request(resp),
+                        "full_response": self.capture_response(resp),
                     }
                 # Data leak: significantly more content returned
                 if len_diff > 200 and resp_len > baseline_len and status == 200:
@@ -318,6 +324,8 @@ class NosqliScanner(Scanner):
                         "response_length": resp_len,
                         "baseline_length": baseline_len,
                         "body_snippet": resp.text[:500],
+                        "full_request": self.capture_request(resp),
+                        "full_response": self.capture_response(resp),
                     }
 
             except Exception as e:
@@ -354,6 +362,8 @@ class NosqliScanner(Scanner):
                             "error_match": sig,
                             "body_snippet": resp.text[:500],
                             "type": "error-based",
+                            "full_request": self.capture_request(resp),
+                            "full_response": self.capture_response(resp),
                         }
 
                 # Auth bypass
@@ -364,6 +374,8 @@ class NosqliScanner(Scanner):
                         "status": status,
                         "type": "auth-bypass",
                         "body_snippet": resp.text[:500],
+                        "full_request": self.capture_request(resp),
+                        "full_response": self.capture_response(resp),
                     }
 
                 # Data leak
@@ -378,6 +390,8 @@ class NosqliScanner(Scanner):
                         "response_length": resp_len,
                         "baseline_length": baseline_len,
                         "body_snippet": resp.text[:500],
+                        "full_request": self.capture_request(resp),
+                        "full_response": self.capture_response(resp),
                     }
 
             except Exception as e:
@@ -417,6 +431,8 @@ class NosqliScanner(Scanner):
                         "false_length": false_len,
                         "true_status": true_resp.status_code,
                         "diff": diff,
+                        "full_request": self.capture_request(true_resp),
+                        "full_response": self.capture_response(true_resp),
                     }
 
                 # Or: true condition returns 200/302, false returns 401/403
@@ -428,6 +444,8 @@ class NosqliScanner(Scanner):
                         "true_status": true_resp.status_code,
                         "false_status": false_resp.status_code,
                         "type": "auth-bypass",
+                        "full_request": self.capture_request(true_resp),
+                        "full_response": self.capture_response(true_resp),
                     }
 
             except Exception as e:
@@ -466,6 +484,8 @@ class NosqliScanner(Scanner):
                         "elapsed": round(elapsed, 2),
                         "baseline_time": round(baseline_time, 2),
                         "delta": round(delta, 2),
+                        "full_request": self.capture_request(resp),
+                        "full_response": self.capture_response(resp),
                     }
 
             except Exception as e:

@@ -334,10 +334,12 @@ class LfiScanner(Scanner):
                 "id_location": id_location,
                 "technique": known_result.get("technique", "path-traversal"),
                 "sibling_fields": siblings or {},
+                "full_request": known_result.get("full_request", ""),
             },
             response_data={
                 "status": known_result.get("status"),
                 "content_length": known_result.get("content_length"),
+                "full_response": known_result.get("full_response", ""),
             },
         )
 
@@ -442,6 +444,8 @@ class LfiScanner(Scanner):
                                 "strong_match": strong,
                                 "content_length": len(resp.text),
                                 "body_snippet": resp.text[:500],
+                                "full_request": self.capture_request(resp),
+                                "full_response": self.capture_response(resp),
                             }
 
             except Exception as e:

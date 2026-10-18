@@ -64,13 +64,17 @@ class IdorScanner(Scanner):
                             confidence=self._assess_confidence(result, len(victim_ids)),
                             request_data={
                                 "id_param": id_param,
+                                "param": id_param,
+                                "payload": str(vid),
                                 "id_value": str(vid),
                                 "id_location": id_location,
                                 "session": "attacker",
+                                "full_request": result.get("full_request", ""),
                             },
                             response_data={
                                 "status": result.get("status"),
                                 "body_snippet": result.get("body_snippet", ""),
+                                "full_response": result.get("full_response", ""),
                             },
                         )
                     )
@@ -127,6 +131,8 @@ class IdorScanner(Scanner):
                 "body_snippet": body,
                 "victim_id": str(victim_id),
                 "indicates_success": True,
+                "full_request": self.capture_request(resp),
+                "full_response": self.capture_response(resp),
             }
 
         return None

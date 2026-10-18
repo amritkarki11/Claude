@@ -292,8 +292,8 @@ def _build_curl(url: str, method: str, req: dict) -> str:
         parts.extend(["-H", f"'{k}: {v}'"])
 
     # Build the payload body/query from scanner-specific fields
-    param = req.get("param") or req.get("parameter", "")
-    payload = req.get("payload") or req.get("payload_true", "")
+    param = req.get("param") or req.get("parameter") or req.get("id_param", "")
+    payload = req.get("payload") or req.get("payload_true") or req.get("id_value", "")
     id_location = req.get("id_location", "query")
     siblings = req.get("sibling_fields") or req.get("siblings") or {}
 

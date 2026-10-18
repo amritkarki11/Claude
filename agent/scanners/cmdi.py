@@ -285,16 +285,19 @@ class CmdiScanner(Scanner):
                     confidence="high",
                     request_data={
                         "param": param,
+                        "payload": canary_result["payload"],
                         "canary_payload": canary_result["payload"],
                         "math_payload": math_result.get("payload", ""),
                         "separator": canary_result["separator"],
                         "id_location": id_location,
                         "technique": "output-based",
                         "sibling_fields": siblings or {},
+                        "full_request": canary_result.get("full_request") or math_result.get("full_request", ""),
                     },
                     response_data={
                         "canary_status": canary_result.get("status"),
                         "math_status": math_result.get("status"),
+                        "full_response": canary_result.get("full_response") or math_result.get("full_response", ""),
                     },
                 )
             else:
@@ -345,10 +348,12 @@ class CmdiScanner(Scanner):
                         "id_location": id_location,
                         "technique": "time-based-blind",
                         "sibling_fields": siblings or {},
+                        "full_request": time_result.get("full_request", ""),
                     },
                     response_data={
                         "status": time_result.get("status"),
                         "elapsed": time_result.get("elapsed"),
+                        "full_response": time_result.get("full_response", ""),
                     },
                 )
 
@@ -424,6 +429,8 @@ class CmdiScanner(Scanner):
                             "os_type": os_type,
                             "status": status,
                             "shell_error_found": shell_error_found,
+                            "full_request": self.capture_request(resp),
+                            "full_response": self.capture_response(resp),
                         }
 
                 except Exception as e:
@@ -499,6 +506,8 @@ class CmdiScanner(Scanner):
                         "expression": f"{a} + {b}",
                         "expected": expected_str,
                         "status": status,
+                        "full_request": self.capture_request(resp),
+                        "full_response": self.capture_response(resp),
                     }
 
             except Exception as e:
@@ -568,6 +577,8 @@ class CmdiScanner(Scanner):
                             "baseline_time": round(baseline_time, 2),
                             "delta": round(delta, 2),
                             "status": status,
+                            "full_request": self.capture_request(resp),
+                            "full_response": self.capture_response(resp),
                         }
 
                 except Exception as e:

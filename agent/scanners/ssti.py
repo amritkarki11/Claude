@@ -235,9 +235,11 @@ class SstiScanner(Scanner):
                     "payload": math_result["payload"],
                     "id_location": id_location,
                     "sibling_fields": siblings or {},
+                    "full_request": math_result.get("full_request", ""),
                 },
                 response_data={
                     "status": math_result.get("status"),
+                    "full_response": math_result.get("full_response", ""),
                 },
             )
 
@@ -275,9 +277,11 @@ class SstiScanner(Scanner):
                 "technique": "ssti",
                 "engine": engine_result.get("engine", "unknown"),
                 "sibling_fields": siblings or {},
+                "full_request": math_result.get("full_request", ""),
             },
             response_data={
                 "status": math_result.get("status"),
+                "full_response": math_result.get("full_response", ""),
             },
         )
 
@@ -331,6 +335,8 @@ class SstiScanner(Scanner):
                         "syntax": syntax,
                         "status": resp.status_code,
                         "body_snippet": body[:500],
+                        "full_request": self.capture_request(resp),
+                        "full_response": self.capture_response(resp),
                     }
 
                 # Also check for template errors (indicates processing)
@@ -345,6 +351,8 @@ class SstiScanner(Scanner):
                             "status": resp.status_code,
                             "error_match": sig,
                             "body_snippet": body[:500],
+                            "full_request": self.capture_request(resp),
+                            "full_response": self.capture_response(resp),
                         }
 
             except Exception as e:

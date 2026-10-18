@@ -175,8 +175,8 @@ class CsrfScanner(Scanner):
                             ),
                         },
                         confidence="high",
-                        request_data={"form_data": form_data, "method": method},
-                        response_data={"status": resp.status_code, "body_snippet": resp.text[:300]},
+                        request_data={"form_data": form_data, "method": method, "full_request": self.capture_request(resp)},
+                        response_data={"status": resp.status_code, "body_snippet": resp.text[:300], "full_response": self.capture_response(resp)},
                     ))
             except Exception:
                 pass
@@ -232,10 +232,11 @@ class CsrfScanner(Scanner):
                     ),
                 },
                 confidence="high",
-                request_data={"form_data": form_data, "csrf_field": csrf_field, "method": method},
+                request_data={"form_data": form_data, "csrf_field": csrf_field, "method": method, "full_request": self.capture_request(resp_tamper)},
                 response_data={
                     "omit_status": resp_omit.status_code if omit_accepted else None,
                     "tamper_status": resp_tamper.status_code if tamper_accepted else None,
+                    "full_response": self.capture_response(resp_tamper),
                 },
             ))
         elif omit_accepted:
@@ -255,8 +256,8 @@ class CsrfScanner(Scanner):
                     ),
                 },
                 confidence="high",
-                request_data={"form_data": form_data, "csrf_field": csrf_field, "method": method},
-                response_data={"omit_status": resp_omit.status_code},
+                request_data={"form_data": form_data, "csrf_field": csrf_field, "method": method, "full_request": self.capture_request(resp_omit)},
+                response_data={"omit_status": resp_omit.status_code, "full_response": self.capture_response(resp_omit)},
             ))
         elif tamper_accepted:
             # Token is required but not validated
@@ -276,8 +277,8 @@ class CsrfScanner(Scanner):
                     ),
                 },
                 confidence="high",
-                request_data={"form_data": form_data, "csrf_field": csrf_field, "method": method},
-                response_data={"tamper_status": resp_tamper.status_code},
+                request_data={"form_data": form_data, "csrf_field": csrf_field, "method": method, "full_request": self.capture_request(resp_tamper)},
+                response_data={"tamper_status": resp_tamper.status_code, "full_response": self.capture_response(resp_tamper)},
             ))
         # else: token is properly enforced — no finding
 

@@ -113,10 +113,12 @@ class OpenRedirectScanner(Scanner):
                             "param": param,
                             "payload": result["payload"],
                             "id_location": loc,
+                            "full_request": result.get("full_request", ""),
                         },
                         response_data={
                             "status": result.get("status"),
                             "redirect_to": result.get("redirect_to"),
+                            "full_response": result.get("full_response", ""),
                         },
                     ))
         else:
@@ -135,10 +137,12 @@ class OpenRedirectScanner(Scanner):
                             "param": param,
                             "payload": result["payload"],
                             "id_location": id_location,
+                            "full_request": result.get("full_request", ""),
                         },
                         response_data={
                             "status": result.get("status"),
                             "redirect_to": result.get("redirect_to"),
+                            "full_response": result.get("full_response", ""),
                         },
                     ))
 
@@ -225,6 +229,8 @@ class OpenRedirectScanner(Scanner):
                         f"Open redirect confirmed: parameter '{param}' redirects "
                         f"to external domain via {resp.status_code} Location header."
                     ),
+                    "full_request": self.capture_request(resp),
+                    "full_response": self.capture_response(resp),
                 }
 
         # Check body-based redirects (meta-refresh, JS location)
@@ -240,6 +246,8 @@ class OpenRedirectScanner(Scanner):
                     f"Open redirect via JavaScript/meta-refresh: parameter '{param}' "
                     f"causes client-side redirect to external domain."
                 ),
+                "full_request": self.capture_request(resp),
+                "full_response": self.capture_response(resp),
             }
 
         return None
