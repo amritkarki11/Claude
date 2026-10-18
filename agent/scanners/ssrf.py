@@ -25,14 +25,18 @@ _SSRF_TARGETS = [
     "http://169.254.169.254/metadata/instance",         # Azure metadata
 ]
 
-# Signatures indicating successful SSRF
+# Signatures indicating successful SSRF (high-confidence, specific)
 _SSRF_SIGNATURES = [
     "ami-id", "instance-id", "local-ipv4",              # AWS
-    "computemetadata", "google",                         # GCP
-    "microsoft", "azure",                                # Azure
-    "root:", "/bin/", "/usr/",                           # Unix file read
-    "localhost", "127.0.0.1",                            # Loopback reflection
-    "<title>", "<html",                                  # Internal web page
+    "computemetadata",                                   # GCP
+    "root:x:", "/bin/bash", "/bin/sh",                   # Unix /etc/passwd
+    "127.0.0.1",                                         # Loopback reflection
+]
+
+# Weak signatures — only count on 2xx with no baseline match
+_SSRF_WEAK_SIGNATURES = [
+    "localhost",
+    "microsoft", "azure", "google",
 ]
 
 # Bypass techniques for common SSRF filters
@@ -118,13 +122,19 @@ class SsrfScanner(Scanner):
                      *, siblings: dict[str, str] | None = None) -> dict | None:
         resp = await self._send(target, param, ssrf_url, method, id_location,
                                 siblings=siblings)
-        body = resp.text[:3000].lower()
 
-        # Check for SSRF signatures in response
+        # Never confirm SSRF on error responses — WAF blocks, 404s, 500s
+        # are not evidence of server-side request forgery
+        if resp.status_code >= 400:
+            return None
+
+        body = resp.text[:3000].lower()
+        baseline_body = baseline.get("body", "").lower() if baseline else ""
+
+        # Check for strong SSRF signatures in response
         for sig in _SSRF_SIGNATURES:
             if sig.lower() in body:
-                # Make sure it's not in the baseline too
-                if baseline and sig.lower() in baseline.get("body", "").lower():
+                if sig.lower() in baseline_body:
                     continue
                 return {
                     "status": resp.status_code,
@@ -132,6 +142,21 @@ class SsrfScanner(Scanner):
                     "signature_match": sig,
                     "body_snippet": resp.text[:500],
                     "confidence": "high" if "metadata" in ssrf_url else "medium",
+                    "full_request": self.capture_request(resp),
+                    "full_response": self.capture_response(resp),
+                }
+
+        # Weak signatures — only on 2xx and not in baseline
+        for sig in _SSRF_WEAK_SIGNATURES:
+            if sig.lower() in body:
+                if sig.lower() in baseline_body:
+                    continue
+                return {
+                    "status": resp.status_code,
+                    "ssrf_url": ssrf_url,
+                    "signature_match": sig,
+                    "body_snippet": resp.text[:500],
+                    "confidence": "low",
                     "full_request": self.capture_request(resp),
                     "full_response": self.capture_response(resp),
                 }

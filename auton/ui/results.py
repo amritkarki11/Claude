@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from urllib.parse import urlencode
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.table import Table
 from rich.text import Text
 from rich.panel import Panel
@@ -193,8 +193,9 @@ def print_finding(finding_num: int, candidate, console: Console) -> None:
     full_req = req.get("full_request", "")
     if full_req:
         console.print()
-        console.print("  [bold grey70]REQUEST[/bold grey70]")
-        console.print(Syntax(full_req, "http", theme="monokai", line_numbers=False, word_wrap=True))
+        console.print(
+            _truncated_panel(full_req, title="REQUEST", lexer="http")
+        )
     elif req.get("headers") or req.get("body"):
         console.print()
         console.print("  [bold grey70]REQUEST[/bold grey70]")
@@ -205,14 +206,40 @@ def print_finding(finding_num: int, candidate, console: Console) -> None:
     full_resp = resp.get("full_response", "")
     if full_resp:
         console.print()
-        console.print("  [bold grey70]RESPONSE[/bold grey70]")
-        console.print(Syntax(full_resp, "http", theme="monokai", line_numbers=False, word_wrap=True))
+        console.print(
+            _truncated_panel(full_resp, title="RESPONSE", lexer="http")
+        )
     elif resp.get("status_code") or resp.get("status") or resp.get("body") or resp.get("body_snippet"):
         console.print()
         console.print("  [bold grey70]RESPONSE[/bold grey70]")
         _print_response_fallback(resp, console)
 
     console.print()
+
+
+_TRUNCATE_LINES = 12
+
+
+def _truncated_panel(text: str, *, title: str, lexer: str) -> Panel:
+    """Wrap text in a bordered Panel, truncating to _TRUNCATE_LINES."""
+    lines = text.splitlines()
+    total = len(lines)
+    if total > _TRUNCATE_LINES:
+        visible = "\n".join(lines[:_TRUNCATE_LINES])
+        remaining = total - _TRUNCATE_LINES
+        footer = f"\n[dim italic]… {remaining} more lines — see full report[/dim italic]"
+        content = Syntax(visible, lexer, theme="monokai", line_numbers=False, word_wrap=True)
+        group = Text.from_markup(footer)
+        body = Group(content, group)
+    else:
+        body = Syntax(text, lexer, theme="monokai", line_numbers=False, word_wrap=True)
+
+    return Panel(
+        body,
+        title=f"[bold grey70]{title}[/bold grey70]",
+        border_style="grey50",
+        padding=(0, 1),
+    )
 
 
 def _print_request_fallback(req: dict, console: Console) -> None:
