@@ -74,8 +74,21 @@ def _run_nmap_on_targets(targets: list[str], allports: bool, console: Console) -
             console.print(nmap_out)
 
 
+async def _async_login(
+    target: str, username: str, password: str, console: Console,
+) -> "Session | None":
+    """Auto-detect login form on target and authenticate."""
+    from agent.http import HttpClient, Session
+    from agent.auth.login import auto_login
+
+    seed_url = target if target.startswith("http") else f"https://{target}"
+    async with HttpClient(verify_ssl=False, stealth=True) as client:
+        return await auto_login(client, seed_url, username, password, console=console)
+
+
 async def _async_recon(target: str, is_wildcard: bool, allports: bool,
-                       use_nmap: bool, console: Console) -> dict | None:
+                       use_nmap: bool, console: Console,
+                       session: "Session | None" = None) -> dict | None:
     """Run the recon pipeline. Nmap only if use_nmap=True."""
     _add_target_to_scope(target, console)
 
@@ -92,12 +105,14 @@ async def _async_recon(target: str, is_wildcard: bool, allports: bool,
         seed_url = f"https://{seed_url}"
 
     _status(console, f"Crawling & analyzing {seed_url}")
+    if session:
+        console.print("  [dim]Running as AUTHENTICATED session[/dim]")
     report = None
     try:
         from agent.http import HttpClient
         from agent.recon.pipeline import run_recon, write_report
         async with HttpClient(verify_ssl=False, stealth=True) as client:
-            report = await run_recon(client, seed_url)
+            report = await run_recon(client, seed_url, session=session)
         if report:
             path = write_report(report)
             print_recon_summary(report, str(path), console)
@@ -112,10 +127,12 @@ async def _async_recon(target: str, is_wildcard: bool, allports: bool,
 
 
 def _run_recon(target: str, is_wildcard: bool, allports: bool,
-               use_nmap: bool, console: Console) -> dict | None:
+               use_nmap: bool, console: Console,
+               session: "Session | None" = None) -> dict | None:
     """Execute the full recon pipeline (sync wrapper)."""
     return asyncio.run(
-        _async_recon(target, is_wildcard, allports, use_nmap, console)
+        _async_recon(target, is_wildcard, allports, use_nmap, console,
+                     session=session)
     )
 
 
@@ -207,7 +224,8 @@ def _get_scanner_class(scanner_key: str):
 
 
 async def _async_run_scanners(report: dict, scanner_keys: list[str],
-                              console: Console) -> None:
+                              console: Console,
+                              session: "Session | None" = None) -> None:
     """Run specified scanners against recon report targets."""
     scan_targets = _build_scan_targets(report)
     if not scan_targets:
@@ -247,12 +265,12 @@ async def _async_run_scanners(report: dict, scanner_keys: list[str],
 
             try:
                 if key == "idor":
-                    attacker = Session()
+                    attacker = session or Session()
                     victim = Session()
                     scanner = scanner_cls(client, attacker, victim)
                 else:
-                    session = Session()
-                    scanner = scanner_cls(client, session)
+                    scan_session = session or Session()
+                    scanner = scanner_cls(client, scan_session)
 
                 matching_recipes = [
                     r for r in recipes
@@ -292,27 +310,31 @@ _ALL_SCANNER_KEYS = [
 
 
 async def _async_fullscan(target: str, is_wildcard: bool, allports: bool,
-                          use_nmap: bool, console: Console) -> None:
+                          use_nmap: bool, console: Console,
+                          session: "Session | None" = None) -> None:
     """Run recon + all vulnerability scanners."""
-    report = await _async_recon(target, is_wildcard, allports, use_nmap, console)
+    report = await _async_recon(target, is_wildcard, allports, use_nmap, console,
+                                session=session)
     if not report:
         console.print(
             "[yellow]No recon data — skipping vulnerability scanners.[/yellow]\n"
         )
         return
-    await _async_run_scanners(report, _ALL_SCANNER_KEYS, console)
+    await _async_run_scanners(report, _ALL_SCANNER_KEYS, console, session=session)
 
 
 async def _async_single_scan(target: str, is_wildcard: bool, scanner_key: str,
-                             console: Console) -> None:
+                             console: Console,
+                             session: "Session | None" = None) -> None:
     """Run recon + a single scanner."""
-    report = await _async_recon(target, is_wildcard, False, False, console)
+    report = await _async_recon(target, is_wildcard, False, False, console,
+                                session=session)
     if not report:
         console.print(
             "[yellow]No recon data — cannot run scanner.[/yellow]\n"
         )
         return
-    await _async_run_scanners(report, [scanner_key], console)
+    await _async_run_scanners(report, [scanner_key], console, session=session)
 
 
 def repl() -> None:
@@ -365,20 +387,36 @@ def repl() -> None:
             continue
 
         if cmd.action == "recon":
-            _run_recon(cmd.target, cmd.is_wildcard, cmd.allports, cmd.nmap, console)
+            session = None
+            if cmd.username and cmd.password:
+                session = asyncio.run(
+                    _async_login(cmd.target, cmd.username, cmd.password, console)
+                )
+            _run_recon(cmd.target, cmd.is_wildcard, cmd.allports, cmd.nmap,
+                       console, session=session)
             continue
 
         if cmd.action == "fullscan":
+            session = None
+            if cmd.username and cmd.password:
+                session = asyncio.run(
+                    _async_login(cmd.target, cmd.username, cmd.password, console)
+                )
             asyncio.run(
                 _async_fullscan(cmd.target, cmd.is_wildcard, cmd.allports,
-                                cmd.nmap, console)
+                                cmd.nmap, console, session=session)
             )
             continue
 
         if cmd.action == "scan_single":
+            session = None
+            if cmd.username and cmd.password:
+                session = asyncio.run(
+                    _async_login(cmd.target, cmd.username, cmd.password, console)
+                )
             asyncio.run(
                 _async_single_scan(cmd.target, cmd.is_wildcard, cmd.scanner,
-                                   console)
+                                   console, session=session)
             )
             continue
 

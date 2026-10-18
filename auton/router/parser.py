@@ -61,6 +61,8 @@ class ParsedCommand:
     allports: bool = False
     nmap: bool = False
     scanner: str = ""
+    username: str = ""
+    password: str = ""
     raw_input: str = ""
     error: str = ""
 
@@ -108,15 +110,38 @@ def _parse_target_cmd(action: str, remaining: list[str], raw: str,
     allports = False
     nmap = False
     target = ""
+    username = ""
+    password = ""
 
-    for tok in remaining:
+    i = 0
+    while i < len(remaining):
+        tok = remaining[i]
         low = tok.lower().lstrip("/")
         if low == "allports":
             allports = True
         elif low == "nmap":
             nmap = True
-        elif not tok.startswith("/") and not tok.startswith("--"):
+        elif low in ("-u", "--username"):
+            if i + 1 < len(remaining):
+                i += 1
+                username = remaining[i]
+            else:
+                return ParsedCommand(
+                    action=action, raw_input=raw,
+                    error=f"{tok} requires a value.",
+                )
+        elif low in ("-p", "--password"):
+            if i + 1 < len(remaining):
+                i += 1
+                password = remaining[i]
+            else:
+                return ParsedCommand(
+                    action=action, raw_input=raw,
+                    error=f"{tok} requires a value.",
+                )
+        elif not tok.startswith("/") and not tok.startswith("-"):
             target = tok
+        i += 1
 
     if not target:
         label = f"/{scanner}" if scanner else f"/{action}"
@@ -133,7 +158,8 @@ def _parse_target_cmd(action: str, remaining: list[str], raw: str,
 
     return ParsedCommand(
         action=action, target=target, is_wildcard=is_wildcard,
-        allports=allports, nmap=nmap, scanner=scanner, raw_input=raw,
+        allports=allports, nmap=nmap, scanner=scanner,
+        username=username, password=password, raw_input=raw,
     )
 
 
@@ -206,6 +232,8 @@ def print_commands_table(console: Console | None = None) -> None:
     flags_tbl.add_row("/nmap", "Add nmap port scan to recon/fullscan")
     flags_tbl.add_row("/allports", "Nmap scans all 65535 ports instead of top 1000")
     flags_tbl.add_row("*.domain", "Wildcard — enumerate subdomains first")
+    flags_tbl.add_row("-u <username>", "Login with username (auto-detects login form)")
+    flags_tbl.add_row("-p <password>", "Login with password (use with -u)")
 
     con.print()
     con.print(flags_tbl)
