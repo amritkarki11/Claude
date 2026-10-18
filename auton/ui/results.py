@@ -39,6 +39,11 @@ def print_recon_summary(report: dict, report_path: str, console: Console) -> Non
     tbl.add_row("Source maps:", str(s.get("sourcemaps", 0)))
     tbl.add_row("Report:", str(report_path))
 
+    # Show crawl errors if pages = 0
+    crawl_errors = report.get("crawl_errors", [])
+    if s.get("pages", 0) == 0 and crawl_errors:
+        tbl.add_row("Blocked:", crawl_errors[0] if crawl_errors else "unknown")
+
     console.print(tbl)
 
     # Technology fingerprint (Wappalyzer + custom rules)

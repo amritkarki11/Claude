@@ -136,6 +136,29 @@ def _run_recon(target: str, is_wildcard: bool, allports: bool,
     )
 
 
+_COMMON_PATHS = [
+    "/login", "/signin", "/register", "/signup", "/search",
+    "/contact", "/feedback", "/comment", "/api/v1", "/api/v2",
+    "/graphql", "/admin", "/dashboard", "/profile", "/settings",
+    "/account", "/forgot-password", "/reset-password",
+]
+
+_COMMON_PARAMS = {
+    "/search": ["q", "query"],
+    "/login": ["username", "password"],
+    "/register": ["username", "email", "password"],
+    "/signup": ["name", "email", "password"],
+    "/forgot-password": ["email"],
+    "/reset-password": ["token", "password"],
+    "/contact": ["name", "email", "message"],
+    "/feedback": ["name", "email", "message"],
+    "/comment": ["comment", "name"],
+    "/profile": ["id", "user"],
+    "/api/v1": ["id"],
+    "/api/v2": ["id"],
+}
+
+
 def _build_scan_targets(report: dict) -> list[dict]:
     """Extract scannable targets from the recon report."""
     from urllib.parse import urljoin
@@ -207,6 +230,46 @@ def _build_scan_targets(report: dict) -> list[dict]:
     return targets
 
 
+async def _probe_common_paths(
+    seed_url: str, console: Console, session: "Session | None" = None,
+) -> list[dict]:
+    """When the crawler finds nothing, probe common paths to build targets."""
+    from agent.http import HttpClient
+    from urllib.parse import urljoin
+
+    console.print(
+        "  [yellow]Crawler found 0 endpoints — probing common paths...[/yellow]"
+    )
+
+    targets: list[dict] = []
+    async with HttpClient(verify_ssl=False, stealth=True) as client:
+        for path in _COMMON_PATHS:
+            url = urljoin(seed_url, path)
+            try:
+                resp = await client.get(url, session=session)
+                if resp.status_code < 400:
+                    params = _COMMON_PARAMS.get(path, ["id", "q"])
+                    is_post = path in ("/login", "/register", "/signup",
+                                       "/contact", "/feedback", "/comment",
+                                       "/forgot-password", "/reset-password")
+                    method = "POST" if is_post else "GET"
+                    targets.append({
+                        "url": url, "params": params, "method": method,
+                        "id_location": "body" if is_post else "query",
+                        "siblings": {},
+                    })
+                    console.print(f"  [green]+[/green] {path} [dim]({resp.status_code})[/dim]")
+            except Exception:
+                continue
+
+    if targets:
+        console.print(f"  [bold white]Found {len(targets)} reachable paths[/bold white]")
+    else:
+        console.print("  [red]No reachable paths found — target may be fully WAF-protected.[/red]")
+
+    return targets
+
+
 def _get_scanner_class(scanner_key: str):
     """Import and return a single scanner class by key."""
     from agent.scanners import (
@@ -229,11 +292,15 @@ async def _async_run_scanners(report: dict, scanner_keys: list[str],
     """Run specified scanners against recon report targets."""
     scan_targets = _build_scan_targets(report)
     if not scan_targets:
-        console.print(
-            "[yellow]No injectable endpoints found (0 forms, 0 parameterized paths) "
-            "— skipping vulnerability scanners.[/yellow]\n"
-        )
-        return
+        # Fallback: probe common paths when crawler found nothing
+        seed = report.get("seed", "")
+        scan_targets = await _probe_common_paths(seed, console, session=session)
+        if not scan_targets:
+            console.print(
+                "[yellow]No injectable endpoints found — "
+                "target may be fully WAF-protected.[/yellow]\n"
+            )
+            return
 
     try:
         from agent.recipes.loader import load_recipes

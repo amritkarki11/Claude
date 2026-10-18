@@ -163,6 +163,7 @@ async def run_recon(
         "fingerprint": fingerprint,
         "dns": dns,
         "ports": ports,
+        "crawl_errors": crawled.get("errors", []),
         "archive": archive,
         "summary": {
             "secrets": len(secrets),

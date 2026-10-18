@@ -549,10 +549,15 @@ class Crawler:
         the user-provided target and is always valid. This prevents false
         positives on sites that return similar templates for 404 pages.
         """
+        resp = None
         try:
             resp = await self.client.get(url, session=self.session)
         except Exception as exc:
             return CrawledPage(url=url, depth=depth, error=str(exc))
+
+        # On 403 at depth 0 (start URL), retry with browser-like headers
+        if resp.status_code == 403 and depth == 0:
+            resp = await self._retry_with_browser_headers(url)
 
         content_type = resp.headers.get("content-type", "")
         page = CrawledPage(
@@ -593,6 +598,66 @@ class Crawler:
         page.script_urls = parsed.script_urls
         page.data_urls = parsed.data_urls
         return page
+
+    async def _retry_with_browser_headers(self, url: str):
+        """Retry a 403'd URL with full browser-like headers."""
+        import httpx as _httpx
+        browser_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Sec-Ch-Ua": '"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+            "Cache-Control": "max-age=0",
+        }
+        try:
+            resp = await self.client.get(url, session=self.session,
+                                         headers=browser_headers)
+            if resp.status_code < 400:
+                return resp
+        except Exception:
+            pass
+
+        # Last resort: try headless browser (handles JS challenges)
+        return await self._fetch_with_browser(url)
+
+    async def _fetch_with_browser(self, url: str):
+        """Fetch a page using headless Chromium via Playwright."""
+        import asyncio
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            logger.info("Playwright not available, cannot bypass JS challenge")
+            import httpx as _httpx
+            return _httpx.Response(403, text="WAF blocked and Playwright unavailable")
+
+        logger.info("Attempting headless browser fetch: %s", url)
+        try:
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(headless=True)
+                ctx = await browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                )
+                page = await ctx.new_page()
+                resp = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                await asyncio.sleep(3)
+                html = await page.content()
+                status = resp.status if resp else 200
+                await browser.close()
+
+            import httpx as _httpx
+            return _httpx.Response(status, text=html, headers={"content-type": "text/html"})
+        except Exception as exc:
+            logger.info("Headless browser fetch failed: %s", exc)
+            import httpx as _httpx
+            return _httpx.Response(403, text=f"Browser fetch failed: {exc}")
 
     # ── Form parsing ───────────────────────────────────────────
 
@@ -768,4 +833,5 @@ async def crawl(
         "pages_crawled": pages_crawled,
         "forms": forms,
         "script_urls": result.all_script_urls,
+        "errors": result.errors,
     }

@@ -252,11 +252,20 @@ def build_nmap_cmd(target: str, allports: bool = False) -> list[str]:
 
 
 def enumerate_subdomains(wildcard_target: str, console: Console | None = None) -> list[str]:
-    """Enumerate subdomains for a wildcard target like *.example.com."""
+    """Enumerate subdomains for a wildcard target like *.example.com.
+
+    Detects DNS wildcards first — if a random subdomain resolves, the domain
+    has a catch-all record and brute-forcing is useless (every name resolves).
+    In that case we only return subdomains that serve distinct HTTP content.
+    """
     con = console or Console()
     base_domain = wildcard_target.lstrip("*.")
 
-    con.print(f"[bright_cyan]Enumerating subdomains for[/bright_cyan] [bold]{base_domain}[/bold]")
+    con.print(f"[bold white]Enumerating subdomains for[/bold white] [bold]{base_domain}[/bold]")
+
+    import socket
+    import uuid
+    import httpx
 
     _COMMON_SUBS = [
         "www", "mail", "ftp", "admin", "api", "dev", "staging", "test",
@@ -265,24 +274,76 @@ def enumerate_subdomains(wildcard_target: str, console: Console | None = None) -
         "dashboard", "auth", "sso", "login", "m", "mobile", "ws",
     ]
 
-    live_hosts: list[str] = []
-    import socket
+    # ── Wildcard detection ──
+    canary = f"{uuid.uuid4().hex[:12]}.{base_domain}"
+    has_wildcard = False
+    wildcard_ips: set[str] = set()
+    try:
+        results = socket.getaddrinfo(canary, None, socket.AF_INET)
+        wildcard_ips = {r[4][0] for r in results}
+        has_wildcard = True
+        con.print(f"  [yellow]DNS wildcard detected (*.{base_domain} → {', '.join(wildcard_ips)})[/yellow]")
+        con.print(f"  [dim]Filtering to subdomains with distinct HTTP responses...[/dim]")
+    except socket.gaierror:
+        pass
 
+    # ── DNS resolution ──
+    resolved: list[tuple[str, set[str]]] = []
     for sub in _COMMON_SUBS:
         fqdn = f"{sub}.{base_domain}"
         try:
-            socket.getaddrinfo(fqdn, None, socket.AF_INET)
-            live_hosts.append(fqdn)
-            con.print(f"  [green]+[/green] {fqdn}")
+            results = socket.getaddrinfo(fqdn, None, socket.AF_INET)
+            ips = {r[4][0] for r in results}
+            resolved.append((fqdn, ips))
         except socket.gaierror:
             pass
 
-    if not live_hosts:
-        con.print(f"  [yellow]No live subdomains found for {base_domain}[/yellow]")
+    if not resolved:
+        con.print(f"  [yellow]No subdomains resolved for {base_domain}[/yellow]")
+        return []
+
+    # ── If wildcard: filter by HTTP response to find real services ──
+    if has_wildcard:
+        live_hosts: list[str] = []
+        wildcard_fp = None
+        try:
+            with httpx.Client(timeout=8, verify=False, follow_redirects=True,
+                              headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"}) as hc:
+                try:
+                    wr = hc.get(f"https://{canary}")
+                    wildcard_fp = (wr.status_code, len(wr.text))
+                except Exception:
+                    pass
+
+                for fqdn, ips in resolved:
+                    # Different IP than wildcard → real record
+                    if ips != wildcard_ips:
+                        live_hosts.append(fqdn)
+                        con.print(f"  [green]+[/green] {fqdn} [dim](unique IP)[/dim]")
+                        continue
+                    # Same IP → check HTTP response
+                    try:
+                        r = hc.get(f"https://{fqdn}")
+                        fp = (r.status_code, len(r.text))
+                        if wildcard_fp and fp == wildcard_fp:
+                            con.print(f"  [dim]-[/dim] [dim]{fqdn} (wildcard)[/dim]")
+                        else:
+                            live_hosts.append(fqdn)
+                            con.print(f"  [green]+[/green] {fqdn}")
+                    except Exception:
+                        con.print(f"  [dim]-[/dim] [dim]{fqdn} (unreachable)[/dim]")
+        except Exception:
+            live_hosts = [fqdn for fqdn, _ in resolved]
     else:
-        con.print(
-            f"  [bold bright_magenta]Found {len(live_hosts)} live subdomains[/bold bright_magenta]"
-        )
+        live_hosts = []
+        for fqdn, ips in resolved:
+            live_hosts.append(fqdn)
+            con.print(f"  [green]+[/green] {fqdn}")
+
+    if not live_hosts:
+        con.print(f"  [yellow]No distinct subdomains found for {base_domain}[/yellow]")
+    else:
+        con.print(f"  [bold white]Found {len(live_hosts)} live subdomains[/bold white]")
     return live_hosts
 
 
